@@ -9,8 +9,6 @@ import android.content.IntentFilter;
 import android.content.SharedPreferences;
 import android.graphics.Bitmap;
 import android.graphics.BitmapFactory;
-import android.graphics.RenderEffect;
-import android.graphics.Shader;
 import android.graphics.Typeface;
 import android.content.DialogInterface;
 import android.graphics.drawable.GradientDrawable;
@@ -120,6 +118,8 @@ public class MainActivity extends Activity {
     private Spinner countSpinner;
     private Spinner styleSpinner;
     private Spinner qualitySpinner;
+    private SeekBar batchPromptSeek;
+    private TextView batchPromptValue;
     private LinearLayout galleryGrid;
     private HorizontalScrollView galleryStrip;
     private Button galleryToggle;
@@ -136,6 +136,7 @@ public class MainActivity extends Activity {
     };
     private String size = "1024x1024";
     private String quality = "high";
+    private int batchPromptLevel = BatchPromptPolicy.DEFAULT_LEVEL;
     private int count = 1;
     private int style = 0;
     private boolean busy;
@@ -290,6 +291,22 @@ public class MainActivity extends Activity {
         composer.addView(hint("质量通过更严格的画面约束生效；精细和极致会自动提高请求尺寸。网关没有独立的质量参数。"));
 
         composer.addView(gap(12));
+        composer.addView(label("多图取景变化"));
+        batchPromptSeek = new SeekBar(this);
+        batchPromptSeek.setMax(100);
+        composer.addView(gap(4));
+        LinearLayout batchPromptLine = new LinearLayout(this);
+        batchPromptLine.setOrientation(LinearLayout.HORIZONTAL);
+        batchPromptLine.setGravity(Gravity.CENTER_VERTICAL);
+        batchPromptLine.addView(batchPromptSeek, new LinearLayout.LayoutParams(0, -2, 1f));
+        batchPromptValue = text(BatchPromptPolicy.displayValue(batchPromptLevel), 14, 0xFF1A1C19);
+        batchPromptValue.setMinWidth(dp(48));
+        batchPromptValue.setGravity(Gravity.END);
+        batchPromptLine.addView(batchPromptValue, new LinearLayout.LayoutParams(-2, -2));
+        composer.addView(batchPromptLine);
+        composer.addView(hint("仅生成第 2 张及以后时生效；0 最稳定，1 变化最大，不改变主体、数量和剧情。"));
+
+        composer.addView(gap(12));
         LinearLayout actions = new LinearLayout(this);
         actions.setOrientation(LinearLayout.HORIZONTAL);
         enhanceButton = button("增强", false);
@@ -406,6 +423,7 @@ public class MainActivity extends Activity {
         paintCounts();
         paintStyles();
         paintQuality();
+        paintBatchPromptLevel();
         paintTextModels();
         bindDropdowns();
         applyAppearance();
@@ -608,6 +626,23 @@ public class MainActivity extends Activity {
         setDropdown(qualitySpinner, labels, selected, position -> {
             quality = values[position];
             savePrefs();
+        });
+    }
+
+    private void paintBatchPromptLevel() {
+        if (batchPromptSeek == null) return;
+        batchPromptLevel = BatchPromptPolicy.clamp(batchPromptLevel);
+        batchPromptSeek.setProgress(batchPromptLevel);
+        batchPromptValue.setText(BatchPromptPolicy.displayValue(batchPromptLevel));
+        batchPromptSeek.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
+            @Override public void onProgressChanged(SeekBar bar, int value, boolean fromUser) {
+                if (!fromUser) return;
+                batchPromptLevel = BatchPromptPolicy.clamp(value);
+                batchPromptValue.setText(BatchPromptPolicy.displayValue(batchPromptLevel));
+                savePrefs();
+            }
+            @Override public void onStartTrackingTouch(SeekBar bar) { }
+            @Override public void onStopTrackingTouch(SeekBar bar) { }
         });
     }
 
@@ -961,6 +996,7 @@ public class MainActivity extends Activity {
         job.putExtra(JobService.EXTRA_PROMPT, prompt);
         job.putExtra(JobService.EXTRA_SIZE, size);
         job.putExtra(JobService.EXTRA_QUALITY, quality);
+        job.putExtra(JobService.EXTRA_BATCH_PROMPT_LEVEL, batchPromptLevel);
         job.putExtra(JobService.EXTRA_COUNT, count);
         job.putExtra(JobService.EXTRA_TIMEOUT, timeoutSeconds);
         if (android.os.Build.VERSION.SDK_INT >= 33 && checkSelfPermission("android.permission.POST_NOTIFICATIONS")
@@ -1208,6 +1244,7 @@ public class MainActivity extends Activity {
         if (sizeSpinner != null) sizeSpinner.setEnabled(!value);
         if (countSpinner != null) countSpinner.setEnabled(!value);
         if (qualitySpinner != null) qualitySpinner.setEnabled(!value);
+        if (batchPromptSeek != null) batchPromptSeek.setEnabled(!value);
         generateButton.setEnabled(!value);
         enhanceButton.setEnabled(!value);
         generateButton.setText(value && !enhancing ? "生成中…" : "生成 " + count + " 张");
@@ -1424,9 +1461,7 @@ public class MainActivity extends Activity {
                     opts.inSampleSize = sample;
                     try (InputStream in = getContentResolver().openInputStream(Uri.parse(uriText))) { bitmap = BitmapFactory.decodeStream(in, null, opts); }
                 }
-                // Android 12+ applies the real GPU blur on the ImageView. The
-                // bitmap fallback is only used on Android 5–11.
-                if (bitmap != null && blurAmount > 0 && Build.VERSION.SDK_INT < 31) {
+                if (bitmap != null && blurAmount > 0) {
                     bitmap = soften(bitmap, blurAmount);
                 }
             } catch (Exception ignored) { }
@@ -1440,13 +1475,7 @@ public class MainActivity extends Activity {
     }
 
     private void applyWallpaperBlur() {
-        if (wallpaperView == null || Build.VERSION.SDK_INT < 31) return;
-        if (blurAmount <= 0) {
-            wallpaperView.setRenderEffect(null);
-            return;
-        }
-        float radius = Math.max(1f, Math.min(25f, blurAmount * 1.35f));
-        wallpaperView.setRenderEffect(RenderEffect.createBlurEffect(radius, radius, Shader.TileMode.CLAMP));
+        // Portable API-21 path. Do not reference RenderEffect on a minSdk 21 app.
     }
 
     private Bitmap soften(Bitmap source, int strength) {
@@ -1555,6 +1584,8 @@ public class MainActivity extends Activity {
         promptField.setText(prefs.getString("draft", ""));
         size = prefs.getString("size", "1024x1024");
         quality = prefs.getString("quality", "high");
+        batchPromptLevel = BatchPromptPolicy.clamp(
+                prefs.getInt(BatchPromptPolicy.PREF_KEY, BatchPromptPolicy.DEFAULT_LEVEL));
         count = prefs.getInt("count", 1);
         style = prefs.getInt("style", 0);
         customStyleText = prefs.getString("customStyle", "");
@@ -1567,6 +1598,7 @@ public class MainActivity extends Activity {
         paintCounts();
         paintStyles();
         paintTextModels();
+        paintBatchPromptLevel();
         refreshSummaries();
         longDraft=prefs.getString("longDraft", "");
         wishDraft=prefs.getString("wishDraft", "");
@@ -1599,6 +1631,7 @@ public class MainActivity extends Activity {
                 .putInt("timeout", readTimeout())
                 .putString("size", size)
                 .putString("quality", quality)
+                .putInt(BatchPromptPolicy.PREF_KEY, BatchPromptPolicy.clamp(batchPromptLevel))
                 .putString("draft", promptField.getText().toString())
                 .putString("promptOriginal",promptHistory.original())
                 .putString("promptUndo",new org.json.JSONArray(promptHistory.steps()).toString())

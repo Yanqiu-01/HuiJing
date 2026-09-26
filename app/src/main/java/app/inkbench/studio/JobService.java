@@ -10,7 +10,8 @@ import java.util.List;
 public final class JobService extends Service {
     static final String STATE = "image_job";
     static final String EXTRA_BASE="base", EXTRA_KEY="key", EXTRA_PROMPT="prompt",
-            EXTRA_SIZE="size", EXTRA_COUNT="count", EXTRA_TIMEOUT="timeout", EXTRA_QUALITY="quality";
+            EXTRA_SIZE="size", EXTRA_COUNT="count", EXTRA_TIMEOUT="timeout", EXTRA_QUALITY="quality",
+            EXTRA_BATCH_PROMPT_LEVEL="batch_prompt_level";
     private static final String CHANNEL="inkbench-gen";
     private static final int NOTE=41;
     private static volatile boolean running;
@@ -40,6 +41,8 @@ public final class JobService extends Service {
                 prompt=intent.getStringExtra(EXTRA_PROMPT), size=intent.getStringExtra(EXTRA_SIZE),
                 quality=intent.getStringExtra(EXTRA_QUALITY);
         final int timeout=intent.getIntExtra(EXTRA_TIMEOUT,360);
+        final int batchPromptLevel=BatchPromptPolicy.clamp(
+                intent.getIntExtra(EXTRA_BATCH_PROMPT_LEVEL, BatchPromptPolicy.DEFAULT_LEVEL));
         started=System.currentTimeMillis();
         running=true;
         try {
@@ -67,7 +70,8 @@ public final class JobService extends Service {
                     if(stopAfterCurrent || terminating) break;
                     currentImage=i;
                     state(true,"正在生成 "+i+"/"+total+" · 已保存 "+made+" 张");
-                    List<GatewayClient.ImageItem> images=client.generate(prompt,size,quality);
+                    List<GatewayClient.ImageItem> images=client.generate(
+                            BatchPromptPolicy.compose(prompt, batchPromptLevel, i - 1), size, quality);
                     GatewayClient.ImageItem first=images.get(0);
                     GalleryStore.Entry entry=gallery.save(first.bytes,prompt,size,"generate",first.conversationId);
                     lastId=entry.id; made++;

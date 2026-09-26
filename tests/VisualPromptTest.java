@@ -31,6 +31,7 @@ public class VisualPromptTest {
   String ultra=VisualPrompt.qualitySuffix("ultra");
   has(standard,"网关执行约束");has(high,"精细档");has(ultra,"极致档");
   if(high.equals(ultra))throw new AssertionError("quality levels collapsed");
+
   System.out.println("PASS: layered prompt engineering, scene-aware detail selection and execution guardrails");
  }
 }
