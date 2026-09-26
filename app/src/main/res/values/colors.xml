@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="ink">#1A1C19</color>
+    <color name="ink_strong">#101210</color>
+    <color name="paper">#F3F1EA</color>
+    <color name="paper_bright">#FFFcf7</color>
+    <color name="jade">#1F6B4A</color>
+    <color name="jade_dark">#14382A</color>
+    <color name="vermilion">#C4492C</color>
+    <color name="gold">#C4A265</color>
+    <color name="muted">#6A675F</color>
+    <color name="line">#E4E0D6</color>
+    <color name="white">#FFFFFF</color>
+</resources>
