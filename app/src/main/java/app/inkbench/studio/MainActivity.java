@@ -139,6 +139,8 @@ public class MainActivity extends Activity {
     private int count = 1;
     private int style = 0;
     private boolean busy;
+    private boolean jobStarting;
+    private long jobStartingAt;
     private boolean imageOpen;
     private boolean textOpen;
     private GalleryStore gallery;
@@ -524,8 +526,10 @@ public class MainActivity extends Activity {
         }
         int selected = style >= 0 && style < STYLES.length ? style : 0;
         setDropdown(styleSpinner, labels, selected, position -> {
-            if (position == STYLE_CUSTOM) showCustomStyleDialog();
-            else {
+            if (position == STYLE_CUSTOM) {
+                // Let the Spinner finish closing its popup before opening an editable dialog.
+                styleSpinner.post(this::showCustomStyleDialog);
+            } else {
                 style = position;
                 savePrefs();
             }
@@ -544,8 +548,7 @@ public class MainActivity extends Activity {
         int selected = Math.max(0, visible.indexOf(textModel));
         setDropdown(textModelSpinner, labels, selected, position -> {
             textModel = labels[position];
-            if (textModelStatus != null) textModelStatus.setText("当前模型：" + textModel + " · 已记住，不会自动切换");
-            savePrefs();
+            if (textModelStatus != null) textModelStatus.setText("当前模型：" + textModel + " · 点设置里的保存后记住");
         });
     }
 
@@ -609,7 +612,7 @@ public class MainActivity extends Activity {
     }
 
     private interface DropdownChoice { void onChoice(int position); }
-    private boolean bindingDropdowns;
+    private boolean customStyleDialogOpen;
     private void bindDropdowns() { }
     private Spinner dropdown() {
         Spinner spinner = new Spinner(this, Spinner.MODE_DROPDOWN);
@@ -636,53 +639,101 @@ public class MainActivity extends Activity {
             }
         };
         adapter.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item);
-        bindingDropdowns = true;
+
+        // Every rebind gets its own token. A delayed callback from an older
+        // rebind must not attach an old choice handler to this Spinner.
+        final Object bindingToken = new Object();
+        spinner.setTag(bindingToken);
+        spinner.setOnItemSelectedListener(null);
         spinner.setAdapter(adapter);
-        spinner.setSelection(Math.max(0, Math.min(selected, labels.length - 1)));
-        spinner.setOnItemSelectedListener(new AdapterView.OnItemSelectedListener() {
+        spinner.setSelection(Math.max(0, Math.min(selected, labels.length - 1)), false);
+        final boolean[] armed = new boolean[]{false};
+        final AdapterView.OnItemSelectedListener listener = new AdapterView.OnItemSelectedListener() {
             public void onItemSelected(AdapterView<?> parent, View view, int position, long id) {
-                if (bindingDropdowns) return;
+                if (!armed[0]) return;
                 choice.onChoice(position);
             }
             public void onNothingSelected(AdapterView<?> parent) { }
+        };
+        spinner.post(() -> {
+            if (spinner.getTag() != bindingToken) return;
+            spinner.setOnItemSelectedListener(listener);
+            spinner.post(() -> {
+                if (spinner.getTag() == bindingToken) armed[0] = true;
+            });
         });
-        bindingDropdowns = false;
     }
 
     private void showCustomStyleDialog() {
+        if (customStyleDialogOpen || isFinishing()) return;
+        customStyleDialogOpen = true;
         final int previousStyle = style;
         final String previousText = customStyleText;
         final EditText input = new EditText(this);
         input.setSingleLine(false);
-        input.setMinLines(2);
+        input.setMinLines(3);
+        input.setMaxLines(6);
+        input.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_FLAG_MULTI_LINE
+                | InputType.TYPE_TEXT_FLAG_CAP_SENTENCES);
+        input.setFocusable(true);
+        input.setFocusableInTouchMode(true);
         input.setText(customStyleText);
+        input.setSelection(input.length());
         input.setHint("例如：赛博朋克，霓虹雨夜");
         input.setPadding(dp(16), dp(12), dp(16), dp(12));
+        final boolean[] settled = new boolean[]{false};
         final AlertDialog dialog = new AlertDialog.Builder(this)
                 .setTitle("自定义风格")
                 .setView(input)
-                .setNegativeButton("取消", (d, which) -> {
-                    style = previousStyle;
-                    customStyleText = previousText;
-                    paintStyles();
-                })
+                .setNegativeButton("取消", null)
                 .setPositiveButton("使用", null)
                 .create();
+        dialog.setCanceledOnTouchOutside(true);
+        dialog.setOnDismissListener(d -> customStyleDialogOpen = false);
+        dialog.setOnShowListener(d -> {
+            android.view.Window window = dialog.getWindow();
+            if (window != null) {
+                window.setSoftInputMode(android.view.WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE
+                        | android.view.WindowManager.LayoutParams.SOFT_INPUT_STATE_ALWAYS_VISIBLE);
+            }
+            input.requestFocus();
+            input.postDelayed(() -> {
+                android.view.inputmethod.InputMethodManager imm =
+                        (android.view.inputmethod.InputMethodManager)getSystemService(INPUT_METHOD_SERVICE);
+                if (imm != null && input.isShown()) imm.showSoftInput(input, android.view.inputmethod.InputMethodManager.SHOW_IMPLICIT);
+            }, 120);
+            dialog.getButton(AlertDialog.BUTTON_NEGATIVE).setOnClickListener(v -> {
+                if (settled[0]) return;
+                settled[0] = true;
+                style = previousStyle;
+                customStyleText = previousText;
+                paintStyles();
+                dialog.dismiss();
+            });
+            dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener(v -> {
+                if (settled[0]) return;
+                String value = input.getText().toString().trim();
+                if (value.length() == 0) {
+                    input.setError("请输入自定义风格，或点击取消");
+                    input.requestFocus();
+                    return;
+                }
+                settled[0] = true;
+                customStyleText = value;
+                style = STYLE_CUSTOM;
+                paintStyles();
+                savePrefs();
+                dialog.dismiss();
+                toast("已使用自定义风格");
+            });
+        });
         dialog.setOnCancelListener(d -> {
+            if (settled[0]) return;
+            settled[0] = true;
             style = previousStyle;
             customStyleText = previousText;
             paintStyles();
         });
-        dialog.setOnShowListener(d -> dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener(v -> {
-            customStyleText = input.getText().toString().trim();
-            style = customStyleText.length() == 0 ? 0 : STYLE_CUSTOM;
-            paintStyles();
-            savePrefs();
-            dialog.dismiss();
-            styleSpinner.clearFocus();
-            mainScroll.requestFocus();
-            toast(style == STYLE_CUSTOM ? "已使用自定义风格" : "自定义风格为空，已恢复默认");
-        }));
         dialog.show();
     }
 
@@ -919,6 +970,8 @@ public class MainActivity extends Activity {
         try {
             if (android.os.Build.VERSION.SDK_INT >= 26) startForegroundService(job);
             else startService(job);
+            jobStarting = true;
+            jobStartingAt = System.currentTimeMillis();
             setBusy(true, "任务正在启动…");
         } catch (Exception e) {
             setBusy(false, "任务启动失败：" + e.getMessage());
@@ -929,7 +982,19 @@ public class MainActivity extends Activity {
         SharedPreferences job = getSharedPreferences(JobService.STATE, MODE_PRIVATE);
         if (!job.contains("message")) return;
         boolean active = JobService.isRunning();
-        if (job.getBoolean("active", false) && !active) {
+        boolean stateActive = job.getBoolean("active", false);
+        long stateUpdated = job.getLong("updated", 0L);
+        if (jobStarting && (active || stateActive || stateUpdated >= jobStartingAt)) jobStarting = false;
+        if (jobStarting && System.currentTimeMillis() - jobStartingAt < 10000L) {
+            if (!enhancing) setBusy(true, "任务正在启动…");
+            return;
+        }
+        if (jobStarting && !active && !stateActive) {
+            jobStarting = false;
+            if (!enhancing) setBusy(false, "任务启动失败，请检查通知权限和后台运行权限");
+            return;
+        }
+        if (stateActive && !active) {
             job.edit().putBoolean("active", false).putString("message",
                     "上次任务已中断；已保存图片保留，不自动重发以免重复消耗额度").apply();
         }
@@ -1034,18 +1099,33 @@ public class MainActivity extends Activity {
         }
     }
 
+    private void openViewer(GalleryStore.Entry entry) {
+        showEntry(entry);
+        java.util.ArrayList<String> paths = new java.util.ArrayList<String>();
+        java.util.ArrayList<String> prompts = new java.util.ArrayList<String>();
+        int index = 0;
+        for (int i = 0; i < visibleEntries.size(); i++) {
+            GalleryStore.Entry item = visibleEntries.get(i);
+            if (item.id.equals(entry.id)) index = paths.size();
+            paths.add(gallery.fileOf(item).getAbsolutePath());
+            prompts.add(item.prompt == null ? "" : item.prompt);
+        }
+        Intent intent = new Intent(this, ViewerActivity.class);
+        intent.putExtra("paths", paths.toArray(new String[0]));
+        intent.putExtra("prompts", prompts.toArray(new String[0]));
+        intent.putExtra("index", index);
+        intent.putExtra("path", gallery.fileOf(entry).getAbsolutePath());
+        intent.putExtra("prompt", entry.prompt);
+        startActivity(intent);
+    }
+
     private ImageView galleryThumb(GalleryStore.Entry entry, int side) {
         ImageView thumb=new ImageView(this);
         thumb.setScaleType(ImageView.ScaleType.CENTER_CROP);
         GradientDrawable bg=new GradientDrawable(); bg.setColor(0xFFE7E2D6); bg.setCornerRadius(dp(12));
         thumb.setBackground(bg); thumb.setClipToOutline(true);
         thumb.setContentDescription("查看图片："+entry.prompt);
-        thumb.setOnClickListener(v->{
-            showEntry(entry);
-            Intent intent=new Intent(this,ViewerActivity.class);
-            intent.putExtra("path",gallery.fileOf(entry).getAbsolutePath()); intent.putExtra("prompt",entry.prompt);
-            startActivity(intent);
-        });
+        thumb.setOnClickListener(v->openViewer(entry));
         thumb.setOnLongClickListener(v->{confirmDelete(entry);return true;});
         previews.load(thumb,gallery.fileOf(entry),side,false);
         return thumb;
@@ -1164,6 +1244,7 @@ public class MainActivity extends Activity {
         final int oldBlock = blockPercent;
         final int oldBlur = blurAmount;
         final boolean oldHighRefresh = highRefresh;
+        final java.util.ArrayList<String> oldTextModels = new java.util.ArrayList<String>(textModels);
         final LinearLayout content = vertical();
         content.setPadding(dp(16), dp(6), dp(16), dp(8));
         content.addView(text("接口", 17, 0xFF1A1C19));
@@ -1233,34 +1314,38 @@ public class MainActivity extends Activity {
         ScrollView scroller = new ScrollView(this);
         scroller.setFillViewport(false);
         scroller.addView(content);
+        final Runnable restoreSettings = () -> {
+            imageBaseField.setText(oldImageBase);
+            imageKeyField.setText(oldImageKey);
+            textBaseField.setText(oldTextBase);
+            textKeyField.setText(oldTextKey);
+            textModel = oldTextModel;
+            textModels.clear();
+            textModels.addAll(oldTextModels);
+            paintTextModels();
+            timeoutField.setText(oldTimeout);
+            wallpaperUri = oldWallpaperUri;
+            shadePercent = oldShade;
+            glassPercent = oldGlass;
+            blockPercent = oldBlock;
+            blurAmount = oldBlur;
+            highRefresh = oldHighRefresh;
+            if (refreshSwitch != null) refreshSwitch.setChecked(oldHighRefresh);
+            if (refreshLabel != null) refreshLabel.setText(Motion.refresh(this, oldHighRefresh));
+            refreshSummaries();
+            applyAppearance();
+            loadWallpaper();
+        };
         AlertDialog dialog = new AlertDialog.Builder(this).setTitle("设置")
-                .setView(scroller).setNegativeButton("取消", (d,w) -> {
-                    imageBaseField.setText(oldImageBase);
-                    imageKeyField.setText(oldImageKey);
-                    textBaseField.setText(oldTextBase);
-                    textKeyField.setText(oldTextKey);
-                    textModel = oldTextModel;
-                    paintTextModels();
-                    timeoutField.setText(oldTimeout);
-                    wallpaperUri = oldWallpaperUri;
-                    shadePercent = oldShade;
-                    glassPercent = oldGlass;
-                    blockPercent = oldBlock;
-                    blurAmount = oldBlur;
-                    highRefresh = oldHighRefresh;
-                    if (refreshSwitch != null) refreshSwitch.setChecked(oldHighRefresh);
-                    if (refreshLabel != null) refreshLabel.setText(Motion.refresh(this, oldHighRefresh));
-                    refreshSummaries();
-                    applyAppearance();
-                    loadWallpaper();
-                })
+                .setView(scroller).setNegativeButton("取消", (d,w) -> restoreSettings.run())
                 .setPositiveButton("保存", (d,w) -> { savePrefs(); applyAppearance(); toast("设置已保存"); })
                 .create();
+        dialog.setOnCancelListener(d -> restoreSettings.run());
         dialog.setOnShowListener(d -> {
             android.view.Window window = dialog.getWindow();
             if (window != null) window.setLayout((int)(getResources().getDisplayMetrics().widthPixels * 0.94f),
                     (int)(getResources().getDisplayMetrics().heightPixels * 0.86f));
-            if (textEndpoint().length() > 0 && textApiKey().length() > 0) refreshTextModels();
+            if (textEndpoint().length() > 0 && textApiKey().length() > 0 && textModels.isEmpty()) refreshTextModels();
         });
         dialog.show();
     }
@@ -1292,6 +1377,10 @@ public class MainActivity extends Activity {
         if (body.getParent() instanceof ViewGroup) ((ViewGroup) body.getParent()).removeView(body);
         wrap.addView(body);
         return wrap;
+    }
+
+    @Override public void onBackPressed() {
+        finish();
     }
 
     @Override protected void onActivityResult(int requestCode, int resultCode, Intent data) {
