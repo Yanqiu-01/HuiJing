@@ -524,8 +524,9 @@ public class MainActivity extends Activity {
         }
         int selected = style >= 0 && style < STYLES.length ? style : 0;
         setDropdown(styleSpinner, labels, selected, position -> {
-            if (position == STYLE_CUSTOM) showCustomStyleDialog();
-            else {
+            if (position == STYLE_CUSTOM) {
+                if (!customStyleDialogOpen) showCustomStyleDialog();
+            } else {
                 style = position;
                 savePrefs();
             }
@@ -610,6 +611,7 @@ public class MainActivity extends Activity {
 
     private interface DropdownChoice { void onChoice(int position); }
     private boolean bindingDropdowns;
+    private boolean customStyleDialogOpen;
     private void bindDropdowns() { }
     private Spinner dropdown() {
         Spinner spinner = new Spinner(this, Spinner.MODE_DROPDOWN);
@@ -650,6 +652,8 @@ public class MainActivity extends Activity {
     }
 
     private void showCustomStyleDialog() {
+        if (customStyleDialogOpen) return;
+        customStyleDialogOpen = true;
         final int previousStyle = style;
         final String previousText = customStyleText;
         final EditText input = new EditText(this);
@@ -662,6 +666,7 @@ public class MainActivity extends Activity {
                 .setTitle("自定义风格")
                 .setView(input)
                 .setNegativeButton("取消", (d, which) -> {
+                    customStyleDialogOpen = false;
                     style = previousStyle;
                     customStyleText = previousText;
                     paintStyles();
@@ -669,11 +674,13 @@ public class MainActivity extends Activity {
                 .setPositiveButton("使用", null)
                 .create();
         dialog.setOnCancelListener(d -> {
+            customStyleDialogOpen = false;
             style = previousStyle;
             customStyleText = previousText;
             paintStyles();
         });
         dialog.setOnShowListener(d -> dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener(v -> {
+            customStyleDialogOpen = false;
             customStyleText = input.getText().toString().trim();
             style = customStyleText.length() == 0 ? 0 : STYLE_CUSTOM;
             paintStyles();
@@ -1034,18 +1041,33 @@ public class MainActivity extends Activity {
         }
     }
 
+    private void openViewer(GalleryStore.Entry entry) {
+        showEntry(entry);
+        java.util.ArrayList<String> paths = new java.util.ArrayList<String>();
+        java.util.ArrayList<String> prompts = new java.util.ArrayList<String>();
+        int index = 0;
+        for (int i = 0; i < visibleEntries.size(); i++) {
+            GalleryStore.Entry item = visibleEntries.get(i);
+            if (item.id.equals(entry.id)) index = paths.size();
+            paths.add(gallery.fileOf(item).getAbsolutePath());
+            prompts.add(item.prompt == null ? "" : item.prompt);
+        }
+        Intent intent = new Intent(this, ViewerActivity.class);
+        intent.putExtra("paths", paths.toArray(new String[0]));
+        intent.putExtra("prompts", prompts.toArray(new String[0]));
+        intent.putExtra("index", index);
+        intent.putExtra("path", gallery.fileOf(entry).getAbsolutePath());
+        intent.putExtra("prompt", entry.prompt);
+        startActivity(intent);
+    }
+
     private ImageView galleryThumb(GalleryStore.Entry entry, int side) {
         ImageView thumb=new ImageView(this);
         thumb.setScaleType(ImageView.ScaleType.CENTER_CROP);
         GradientDrawable bg=new GradientDrawable(); bg.setColor(0xFFE7E2D6); bg.setCornerRadius(dp(12));
         thumb.setBackground(bg); thumb.setClipToOutline(true);
         thumb.setContentDescription("查看图片："+entry.prompt);
-        thumb.setOnClickListener(v->{
-            showEntry(entry);
-            Intent intent=new Intent(this,ViewerActivity.class);
-            intent.putExtra("path",gallery.fileOf(entry).getAbsolutePath()); intent.putExtra("prompt",entry.prompt);
-            startActivity(intent);
-        });
+        thumb.setOnClickListener(v->openViewer(entry));
         thumb.setOnLongClickListener(v->{confirmDelete(entry);return true;});
         previews.load(thumb,gallery.fileOf(entry),side,false);
         return thumb;
@@ -1292,6 +1314,10 @@ public class MainActivity extends Activity {
         if (body.getParent() instanceof ViewGroup) ((ViewGroup) body.getParent()).removeView(body);
         wrap.addView(body);
         return wrap;
+    }
+
+    @Override public void onBackPressed() {
+        finish();
     }
 
     @Override protected void onActivityResult(int requestCode, int resultCode, Intent data) {
