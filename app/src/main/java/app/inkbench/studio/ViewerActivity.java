@@ -20,6 +20,9 @@ public class ViewerActivity extends Activity {
     private String[] paths = new String[0];
     private String[] prompts = new String[0];
     private int index;
+    private float touchStartX;
+    private float touchStartY;
+    private boolean horizontalSwipe;
     private ImageView image;
     private TextView caption;
     private TextView position;
@@ -85,6 +88,9 @@ public class ViewerActivity extends Activity {
 
         GestureDetector gestures = new GestureDetector(this, new GestureDetector.SimpleOnGestureListener() {
             @Override public boolean onDown(MotionEvent event) { return true; }
+            @Override public boolean onScroll(MotionEvent start, MotionEvent end, float distanceX, float distanceY) {
+                return Math.abs(distanceX) > Math.abs(distanceY);
+            }
             @Override public boolean onFling(MotionEvent start, MotionEvent end, float velocityX, float velocityY) {
                 if (start == null || end == null) return false;
                 float dx = end.getX() - start.getX();
@@ -93,7 +99,20 @@ public class ViewerActivity extends Activity {
                 return true;
             }
         });
-        View.OnTouchListener touch = (v, event) -> gestures.onTouchEvent(event);
+        View.OnTouchListener touch = (v, event) -> {
+            int action = event.getActionMasked();
+            if (action == MotionEvent.ACTION_DOWN) {
+                touchStartX = event.getX();
+                touchStartY = event.getY();
+                horizontalSwipe = false;
+            } else if (!horizontalSwipe) {
+                float dx = Math.abs(event.getX() - touchStartX);
+                float dy = Math.abs(event.getY() - touchStartY);
+                horizontalSwipe = dx > dp(18) && dx > dy;
+            }
+            gestures.onTouchEvent(event);
+            return horizontalSwipe;
+        };
         image.setOnTouchListener(touch);
         scroll.setOnTouchListener(touch);
         setContentView(root);
