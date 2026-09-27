@@ -78,13 +78,14 @@ public class MainActivity extends Activity {
     private String customStyleText = "";
     private FrameLayout appShell;
     private ImageView wallpaperView;
+    private ImageView wallpaperBlurView;
     private View wallpaperShade;
     private Button settingsButton;
     private ScrollView mainScroll;
     private int wallpaperLoadToken;
     private String wallpaperUri = "";
-    private int shadePercent = 22;
-    private int glassPercent = 88;
+    private int shadePercent = 18;
+    private int glassPercent = 72;
     private int blurAmount = 8;
     private int scrollBeforeIme;
     private boolean imeWasVisible;
@@ -183,6 +184,9 @@ public class MainActivity extends Activity {
         wallpaperView = new ImageView(this);
         wallpaperView.setScaleType(ImageView.ScaleType.CENTER_CROP);
         appShell.addView(wallpaperView, new FrameLayout.LayoutParams(-1, -1));
+        wallpaperBlurView = new ImageView(this);
+        wallpaperBlurView.setScaleType(ImageView.ScaleType.CENTER_CROP);
+        appShell.addView(wallpaperBlurView, new FrameLayout.LayoutParams(-1, -1));
         wallpaperShade = new View(this);
         appShell.addView(wallpaperShade, new FrameLayout.LayoutParams(-1, -1));
 
@@ -654,6 +658,17 @@ public class MainActivity extends Activity {
         spinner.setMinimumHeight(dp(48));
         spinner.setBackground(inputBackground());
         spinner.setPadding(dp(10), dp(4), dp(10), dp(4));
+        spinner.setDropDownVerticalOffset(dp(6));
+        spinner.setDropDownHorizontalOffset(0);
+        GradientDrawable popup = new GradientDrawable();
+        popup.setColor(0xF7F7F3EC);
+        popup.setCornerRadius(dp(16));
+        popup.setStroke(dp(1), 0x66FFFFFF);
+        spinner.setPopupBackgroundDrawable(popup);
+        spinner.setElevation(dp(8));
+        spinner.post(() -> {
+            if (spinner.getWidth() > 0) spinner.setDropDownWidth(spinner.getWidth());
+        });
         return spinner;
     }
     private void setDropdown(Spinner spinner, String[] labels, int selected, DropdownChoice choice) {
@@ -1445,37 +1460,79 @@ public class MainActivity extends Activity {
         final int token = ++wallpaperLoadToken;
         final String uriText = wallpaperUri;
         new Thread(() -> {
-            Bitmap bitmap = null;
+            Bitmap clear = null;
+            Bitmap soft = null;
             try {
-                if (uriText.isEmpty()) {
-                    android.graphics.BitmapFactory.Options opts = new android.graphics.BitmapFactory.Options();
-                    opts.inSampleSize = 2;
-                    bitmap = BitmapFactory.decodeResource(getResources(), R.drawable.wallpaper_default, opts);
-                } else {
-                    android.graphics.BitmapFactory.Options bounds = new android.graphics.BitmapFactory.Options();
-                    bounds.inJustDecodeBounds = true;
-                    try (InputStream in = getContentResolver().openInputStream(Uri.parse(uriText))) { BitmapFactory.decodeStream(in, null, bounds); }
-                    android.graphics.BitmapFactory.Options opts = new android.graphics.BitmapFactory.Options();
-                    int sample = 1;
-                    while (Math.max(bounds.outWidth, bounds.outHeight) / sample > 900) sample *= 2;
-                    opts.inSampleSize = sample;
-                    try (InputStream in = getContentResolver().openInputStream(Uri.parse(uriText))) { bitmap = BitmapFactory.decodeStream(in, null, opts); }
+                clear = decodeWallpaper(uriText, uriText.isEmpty() ? 2048 : 1280);
+                if (blurAmount > 0) {
+                    Bitmap blurSource = decodeWallpaper(uriText, 420);
+                    if (blurSource != null) soft = soften(blurSource, blurAmount);
                 }
-                if (bitmap != null && blurAmount > 0) {
-                    bitmap = soften(bitmap, blurAmount);
-                }
+            } catch (OutOfMemoryError memory) {
+                if (clear != null) { clear.recycle(); clear = null; }
+                if (soft != null) { soft.recycle(); soft = null; }
+                System.gc();
+                try {
+                    clear = decodeWallpaper(uriText, 720);
+                    if (blurAmount > 0) {
+                        Bitmap blurSource = decodeWallpaper(uriText, 280);
+                        if (blurSource != null) soft = soften(blurSource, Math.min(blurAmount, 6));
+                    }
+                } catch (Throwable ignored) { }
             } catch (Exception ignored) { }
-            final Bitmap result = bitmap;
+            final Bitmap result = clear;
+            final Bitmap blurResult = soft;
             runOnUiThread(() -> {
-                if (destroyed || token != wallpaperLoadToken || result == null) return;
-                wallpaperView.setImageBitmap(result);
+                if (destroyed || token != wallpaperLoadToken || result == null) {
+                    recycleBitmap(result);
+                    recycleBitmap(blurResult);
+                    return;
+                }
+                replaceWallpaperBitmap(wallpaperView, result);
+                replaceWallpaperBitmap(wallpaperBlurView, blurResult);
                 applyWallpaperBlur();
             });
         }, "appearance-wallpaper").start();
     }
 
+    private Bitmap decodeWallpaper(String uriText, int maxDimension) throws Exception {
+        BitmapFactory.Options opts = new BitmapFactory.Options();
+        if (uriText.isEmpty()) {
+            // The bundled 1080x1920 image is small enough to keep its detail.
+            opts.inSampleSize = 1;
+            return BitmapFactory.decodeResource(getResources(), R.drawable.wallpaper_default, opts);
+        }
+        BitmapFactory.Options bounds = new BitmapFactory.Options();
+        bounds.inJustDecodeBounds = true;
+        try (InputStream in = getContentResolver().openInputStream(Uri.parse(uriText))) {
+            BitmapFactory.decodeStream(in, null, bounds);
+        }
+        int sample = 1;
+        while (Math.max(bounds.outWidth, bounds.outHeight) / sample > maxDimension) sample *= 2;
+        opts.inSampleSize = sample;
+        opts.inPreferredConfig = Bitmap.Config.RGB_565;
+        try (InputStream in = getContentResolver().openInputStream(Uri.parse(uriText))) {
+            return BitmapFactory.decodeStream(in, null, opts);
+        }
+    }
+
+    private void replaceWallpaperBitmap(ImageView view, Bitmap next) {
+        if (view == null) { recycleBitmap(next); return; }
+        android.graphics.drawable.Drawable drawable = view.getDrawable();
+        if (drawable instanceof android.graphics.drawable.BitmapDrawable) {
+            Bitmap old = ((android.graphics.drawable.BitmapDrawable) drawable).getBitmap();
+            if (old != next) recycleBitmap(old);
+        }
+        view.setImageBitmap(next);
+    }
+
+    private static void recycleBitmap(Bitmap bitmap) {
+        if (bitmap != null && !bitmap.isRecycled()) bitmap.recycle();
+    }
+
     private void applyWallpaperBlur() {
-        // Portable API-21 path. Do not reference RenderEffect on a minSdk 21 app.
+        if (wallpaperBlurView == null) return;
+        wallpaperBlurView.setAlpha(blurAmount <= 0 ? 0f : Math.min(0.34f, 0.08f + blurAmount / 32f));
     }
 
     private Bitmap soften(Bitmap source, int strength) {
@@ -1610,9 +1667,14 @@ public class MainActivity extends Activity {
         promptHistory.load(prefs.contains("promptOriginal")?prefs.getString("promptOriginal", ""):null,history);
         refreshHistoryButtons();
         highRefresh=prefs.getBoolean("highRefresh",true);
-        shadePercent=prefs.getInt("shadePercent",22);
-        glassPercent=prefs.getInt("glassPercent",88);
+        shadePercent=prefs.getInt("shadePercent",18);
+        glassPercent=prefs.getInt("glassPercent",72);
         blockPercent=prefs.getInt("blockPercent",88);
+        if (!prefs.getBoolean("jellyAppearanceMigrated", false)
+                && shadePercent == 22 && glassPercent == 88) {
+            shadePercent = 18;
+            glassPercent = 72;
+        }
         galleryExpanded=prefs.getBoolean("galleryExpanded",false);
         blurAmount=prefs.getInt("blurAmount",8);
         wallpaperUri=prefs.getString("wallpaperUri","");
@@ -1639,6 +1701,7 @@ public class MainActivity extends Activity {
                 .putBoolean("highRefresh",highRefresh)
                 .putInt("shadePercent",shadePercent)
                 .putInt("glassPercent",glassPercent)
+                .putBoolean("jellyAppearanceMigrated",true)
                 .putInt("blockPercent",blockPercent)
                 .putBoolean("galleryExpanded",galleryExpanded)
                 .putInt("blurAmount",blurAmount)
