@@ -59,6 +59,10 @@ public final class GatewayClient {
     private final String baseUrl;
     private final String apiKey;
     private final int timeoutMs;
+    private final android.content.Context diagnosticContext;
+    private int requestAttempt;
+    private long requestStarted;
+    private String lastDiagnosticId = "";
     private volatile boolean cancelled;
     private volatile HttpURLConnection activeConnection;
 
@@ -73,6 +77,10 @@ public final class GatewayClient {
         return cancelled;
     }
 
+    public String lastDiagnosticId() {
+        return lastDiagnosticId;
+    }
+
     private void checkCancelled() throws ApiException {
         if (cancelled || Thread.currentThread().isInterrupted()) {
             throw new ApiException(499, "cancelled", "图片任务已取消");
@@ -80,6 +88,11 @@ public final class GatewayClient {
     }
 
     public GatewayClient(String baseUrl, String apiKey, int timeoutSeconds) {
+        this(null, baseUrl, apiKey, timeoutSeconds);
+    }
+
+    public GatewayClient(android.content.Context context, String baseUrl, String apiKey, int timeoutSeconds) {
+        this.diagnosticContext = context == null ? null : context.getApplicationContext();
         String trimmed = baseUrl == null ? "" : baseUrl.trim();
         while (trimmed.endsWith("/")) {
             trimmed = trimmed.substring(0, trimmed.length() - 1);
@@ -227,7 +240,17 @@ public final class GatewayClient {
         body.put("response_format", "b64_json");
         body.put("model", "gpt-image-2");
         String raw = postJsonRetry("/v1/images/generations", body);
-        return decodeResponse(raw);
+        try {
+            return decodeResponse(raw);
+        } catch (ApiException e) {
+            recordDiagnostic("response_parse", "/v1/images/generations", e);
+            throw e;
+        } catch (Exception e) {
+            ApiException failure = new ApiException(502, "response_parse",
+                    "图片响应解析失败：" + (e.getMessage() == null ? e.getClass().getSimpleName() : e.getMessage()));
+            recordDiagnostic("response_parse", "/v1/images/generations", failure);
+            throw failure;
+        }
     }
 
 
@@ -259,9 +282,12 @@ public final class GatewayClient {
             checkCancelled();
             progress("请求 " + attempt + "/" + maxAttempts + " · 正在等待网关");
             try {
+                requestAttempt = attempt;
+                requestStarted = System.currentTimeMillis();
                 return postJson(path, payload);
             } catch (ApiException e) {
                 if (cancelled || e.status == 499) throw new ApiException(499, "cancelled", "图片任务已取消");
+                recordDiagnostic("http_error", path, e);
                 last = e;
                 boolean retry = shouldRetry(e) && attempt < maxAttempts;
                 String detail = "请求 " + attempt + "/" + maxAttempts + " · HTTP " + e.status + " · " + e.getMessage();
@@ -276,6 +302,11 @@ public final class GatewayClient {
                     Thread.currentThread().interrupt();
                     throw new ApiException(499, "cancelled", "图片任务已取消");
                 }
+            } catch (Exception e) {
+                ApiException failure = new ApiException(0, "network_io",
+                        "请求过程异常：" + (e.getMessage() == null ? e.getClass().getSimpleName() : e.getMessage()));
+                recordDiagnostic("network_io", path, failure);
+                throw failure;
             }
         }
         throw last;
@@ -407,13 +438,21 @@ public final class GatewayClient {
         try {
             code = conn.getResponseCode();
         } catch (Exception e) {
-            throw new ApiException(0, "network", "连不上网关：" + e.getMessage());
+            ApiException failure = new ApiException(0, "network", "连不上网关：" + e.getMessage());
+            recordDiagnostic("network", "unknown", failure);
+            throw failure;
         }
         InputStream stream = code >= 400 ? conn.getErrorStream() : conn.getInputStream();
         String text = readText(stream);
         if (code >= 400) throw parseError(code, text);
         if (text == null || text.length() == 0) throw new ApiException(code, "empty", "网关返回空响应");
         return text;
+    }
+
+    private void recordDiagnostic(String phase, String path, ApiException error) {
+        if (diagnosticContext == null) return;
+        lastDiagnosticId = DiagnosticLog.record(diagnosticContext, phase, path, error.status,
+                error.type, error.getMessage(), System.currentTimeMillis() - requestStarted, requestAttempt);
     }
 
     private static ApiException parseError(int code, String text) {
@@ -433,9 +472,6 @@ public final class GatewayClient {
             }
         } catch (Exception ignored) {
             if (message.length() > 240) message = message.substring(0, 240);
-        }
-        if ("origin_bad_gateway".equalsIgnoreCase(type) || "upstream_timeout".equalsIgnoreCase(type)) {
-            message = "图片上游暂时不可用（网关 502），请稍后重试";
         }
         if (message.length() == 0) message = "HTTP " + code;
         return new ApiException(code, type, message);

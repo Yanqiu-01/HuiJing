@@ -1651,22 +1651,29 @@ public class MainActivity extends Activity {
 
     private static String explain(GatewayClient.ApiException e) {
         String msg = e.getMessage() == null ? "" : e.getMessage();
-        if (e.status == 401 || msg.toLowerCase(Locale.US).contains("api key")) {
-            return "密钥无效。到对应网关新建一把再贴过来。";
+        String lower = msg.toLowerCase(Locale.US);
+        if (e.status == 401 || e.status == 403 || lower.contains("api key") || lower.contains("unauthorized")) {
+            return "鉴权失败（HTTP " + e.status + "）：" + msg;
         }
-        if (e.status == 429 || "rate_limit_error".equals(e.type) || msg.toLowerCase(Locale.US).contains("quota")) {
-            return "网关限流或额度受限（429）：" + msg;
+        if (e.status == 429 || "rate_limit_error".equalsIgnoreCase(e.type) || lower.contains("quota")) {
+            return "上游限流或额度受限（HTTP " + e.status + "）：" + msg;
         }
-        if (msg.contains("no image") || msg.contains("upstream returned no image")) {
-            return "上游没给出图片。常见原因是提示词被拒，或账号还没登录。";
+        if (e.type.toLowerCase(Locale.US).contains("policy")
+                || e.type.toLowerCase(Locale.US).contains("filter")
+                || lower.contains("content policy") || lower.contains("safety")) {
+            return "上游内容策略拒绝（HTTP " + e.status + "）：" + msg;
         }
-        if ("origin_bad_gateway".equalsIgnoreCase(e.type)
-                || msg.contains("图片上游暂时不可用")
-                || (e.status >= 502 && e.status <= 504)) {
-            return "图片服务暂时拥堵，已自动退避重试；若仍失败，请稍后再生成。";
+        if ("origin_bad_gateway".equalsIgnoreCase(e.type) || "upstream_timeout".equalsIgnoreCase(e.type)) {
+            return "网关到上游失败（HTTP " + e.status + "）：" + msg;
         }
-        if (e.status == 0) return msg;
-        return "网关返回 " + e.status + "：" + msg;
+        if (e.status >= 500 && e.status <= 599) {
+            return "网关或上游服务错误（HTTP " + e.status + "）：" + msg;
+        }
+        if (e.status == 0) return "网络或本地 I/O 错误：" + msg;
+        if (e.type.toLowerCase(Locale.US).contains("empty") || lower.contains("没有返回图片")) {
+            return "网关响应格式异常：没有可用图片（HTTP " + e.status + "）：" + msg;
+        }
+        return "网关返回 HTTP " + e.status + "（" + e.type + "）：" + msg;
     }
 
     private static String shortId(String id) {

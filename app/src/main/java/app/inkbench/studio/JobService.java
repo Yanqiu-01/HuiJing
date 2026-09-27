@@ -78,7 +78,7 @@ public final class JobService extends Service {
         new Thread(() -> {
             String message;
             try {
-                GatewayClient client=new GatewayClient(base,key,timeout).withProgress(updateText -> {
+                GatewayClient client=new GatewayClient(getApplicationContext(),base,key,timeout).withProgress(updateText -> {
                     if (!terminating) state(true, "第 " + currentImage + "/" + total + " 张 · " + updateText);
                 });
                 currentClient=client;
@@ -111,7 +111,9 @@ public final class JobService extends Service {
                         && ((GatewayClient.ApiException)e).status == 499)) {
                     message="任务已中断 · 已保存 "+made+"/"+total+" 张";
                 } else {
-                    message="已保存 "+made+"/"+total+" 张；任务中断："+detail(e);
+                    String diagnostic = currentClient == null ? "" : currentClient.lastDiagnosticId();
+                    message="已保存 "+made+"/"+total+" 张；任务中断："+detail(e)
+                            + (diagnostic.length() == 0 ? "" : " · 诊断编号 "+diagnostic);
                 }
             }
             currentClient=null;
