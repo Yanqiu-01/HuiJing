@@ -659,15 +659,18 @@ public class MainActivity extends Activity {
         spinner.setBackground(inputBackground());
         spinner.setPadding(dp(10), dp(4), dp(10), dp(4));
         spinner.setDropDownVerticalOffset(dp(6));
-        spinner.setDropDownHorizontalOffset(0);
         GradientDrawable popup = new GradientDrawable();
         popup.setColor(0xF7F7F3EC);
         popup.setCornerRadius(dp(16));
         popup.setStroke(dp(1), 0x66FFFFFF);
         spinner.setPopupBackgroundDrawable(popup);
         spinner.setElevation(dp(8));
-        spinner.post(() -> {
-            if (spinner.getWidth() > 0) spinner.setDropDownWidth(spinner.getWidth());
+        spinner.addOnLayoutChangeListener((view, left, top, right, bottom, oldLeft, oldTop, oldRight, oldBottom) -> {
+            int width = right - left;
+            if (width <= 0) return;
+            int inset = dp(12);
+            spinner.setDropDownHorizontalOffset(-inset);
+            spinner.setDropDownWidth(width + inset * 2);
         });
         return spinner;
     }
@@ -684,7 +687,9 @@ public class MainActivity extends Activity {
                 TextView view = (TextView) super.getDropDownView(position, convertView, parent);
                 view.setTextColor(0xFF1A1C19);
                 view.setTextSize(15);
-                view.setPadding(dp(14), dp(12), dp(14), dp(12));
+                view.setMinHeight(dp(46));
+                view.setBackgroundColor(Color.TRANSPARENT);
+                view.setPadding(dp(14), dp(10), dp(14), dp(10));
                 return view;
             }
         };
@@ -1631,7 +1636,6 @@ public class MainActivity extends Activity {
         String legacyBase = prefs.getString("base", "");
         String legacyKey = prefs.getString("key", "");
         String savedImageBase = prefs.getString("imageBase", legacyBase);
-        if ("http://127.0.0.1:4141".equals(savedImageBase)) savedImageBase = "";
         imageBaseField.setText(savedImageBase);
         imageKeyField.setText(prefs.getString("imageKey", legacyKey));
         textBaseField.setText(prefs.getString("textBase", ""));
@@ -1684,9 +1688,16 @@ public class MainActivity extends Activity {
 
     private void savePrefs() {
         refreshSummaries();
+        SharedPreferences existing = getSharedPreferences(PREFS, MODE_PRIVATE);
+        String imageBase = imageBaseField.getText().toString().trim();
+        String imageKey = imageKeyField.getText().toString().trim();
+        // A lifecycle callback after starting the foreground job must not erase
+        // a previously saved endpoint if the settings view is temporarily empty.
+        if (imageBase.length() == 0) imageBase = existing.getString("imageBase", existing.getString("base", ""));
+        if (imageKey.length() == 0) imageKey = existing.getString("imageKey", existing.getString("key", ""));
         getSharedPreferences(PREFS, MODE_PRIVATE).edit()
-                .putString("imageBase", imageBaseField.getText().toString().trim())
-                .putString("imageKey", imageKeyField.getText().toString().trim())
+                .putString("imageBase", imageBase)
+                .putString("imageKey", imageKey)
                 .putString("textBase", textBaseField.getText().toString().trim())
                 .putString("textKey", textKeyField.getText().toString().trim())
                 .putString("textModel", textModel)
