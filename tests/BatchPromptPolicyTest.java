@@ -28,6 +28,8 @@ public final class BatchPromptPolicyTest {
         String[] batch = new String[4];
         for (int i = 0; i < batch.length; i++) batch[i] = BatchPromptPolicy.compose(original, 100, i);
         if (!batch[0].equals(original)) throw new AssertionError("request one changed");
+        if (!batch[1].contains("从略低机位拍摄") || !batch[2].contains("三分之二侧向机位")
+                || !batch[3].contains("较高的斜向机位")) throw new AssertionError("three distinct plans missing");
         for (int i = 1; i < batch.length; i++) {
             if (batch[i].equals(batch[0])) throw new AssertionError("request variation missing at " + i);
             for (int j = i + 1; j < batch.length; j++) {

@@ -59,6 +59,25 @@ public final class GatewayClient {
     private final String baseUrl;
     private final String apiKey;
     private final int timeoutMs;
+    private volatile boolean cancelled;
+    private volatile HttpURLConnection activeConnection;
+
+    /** Cancels the in-flight request and prevents any retry from starting. */
+    public void cancel() {
+        cancelled = true;
+        HttpURLConnection connection = activeConnection;
+        if (connection != null) connection.disconnect();
+    }
+
+    public boolean isCancelled() {
+        return cancelled;
+    }
+
+    private void checkCancelled() throws ApiException {
+        if (cancelled || Thread.currentThread().isInterrupted()) {
+            throw new ApiException(499, "cancelled", "图片任务已取消");
+        }
+    }
 
     public GatewayClient(String baseUrl, String apiKey, int timeoutSeconds) {
         String trimmed = baseUrl == null ? "" : baseUrl.trim();
@@ -96,7 +115,10 @@ public final class GatewayClient {
             }
             if (ids.isEmpty()) throw new ApiException(200, "empty_models", "文字接口没有返回可用模型");
             return new ArrayList<String>(ids);
-        } finally { conn.disconnect(); }
+        } finally {
+            conn.disconnect();
+            if (activeConnection == conn) activeConnection = null;
+        }
     }
 
     public String enhancePrompt(String idea, String styleNote, String textModel) throws Exception {
@@ -195,6 +217,7 @@ public final class GatewayClient {
     }
 
     public List<ImageItem> generate(String prompt, String size, String quality) throws Exception {
+        checkCancelled();
         JSONObject body = new JSONObject();
         body.put("prompt", applyQuality(prompt, quality));
         body.put("size", qualitySize(size, quality));
@@ -231,10 +254,12 @@ public final class GatewayClient {
         long started = System.currentTimeMillis();
         final int maxAttempts = 3;
         for (int attempt = 1; attempt <= maxAttempts; attempt++) {
+            checkCancelled();
             progress("请求 " + attempt + "/" + maxAttempts + " · 正在等待网关");
             try {
                 return postJson(path, payload);
             } catch (ApiException e) {
+                if (cancelled || e.status == 499) throw new ApiException(499, "cancelled", "图片任务已取消");
                 last = e;
                 boolean retry = shouldRetry(e) && attempt < maxAttempts;
                 String detail = "请求 " + attempt + "/" + maxAttempts + " · HTTP " + e.status + " · " + e.getMessage();
@@ -243,9 +268,12 @@ public final class GatewayClient {
                     throw new ApiException(e.status, e.type, "已请求 " + attempt + " 次，耗时 "
                             + ((System.currentTimeMillis()-started)/1000) + " 秒；" + e.getMessage());
                 }
-                // Cloudflare's origin_bad_gateway response asks for backoff.
-                // Keep the retry finite so a stuck upstream cannot freeze a job.
-                Thread.sleep(attempt == 1 ? 5000L : 60000L);
+                try {
+                    Thread.sleep(attempt == 1 ? 5000L : 60000L);
+                } catch (InterruptedException interrupted) {
+                    Thread.currentThread().interrupt();
+                    throw new ApiException(499, "cancelled", "图片任务已取消");
+                }
             }
         }
         throw last;
@@ -270,6 +298,7 @@ public final class GatewayClient {
         if (m365 != null) conversation = m365.optString("conversationId", "");
         List<ImageItem> out = new ArrayList<ImageItem>();
         for (int i = 0; i < data.length(); i++) {
+            checkCancelled();
             JSONObject item = data.optJSONObject(i);
             if (item == null) continue;
             String b64 = item.optString("b64_json", "");
@@ -300,7 +329,10 @@ public final class GatewayClient {
             conn.setFixedLengthStreamingMode(payload.length);
             try (OutputStream os = conn.getOutputStream()) { os.write(payload); }
             return readResponse(conn);
-        } finally { conn.disconnect(); }
+        } finally {
+            conn.disconnect();
+            if (activeConnection == conn) activeConnection = null;
+        }
     }
 
     private byte[] download(String url) throws Exception {
@@ -317,11 +349,19 @@ public final class GatewayClient {
                 conn.setRequestProperty("User-Agent", "Mozilla/5.0 (Linux; Android 12; Mobile) AppleWebKit/537.36 Chrome/131.0 Mobile Safari/537.36");
             }
         }
-        int code = conn.getResponseCode();
-        InputStream stream = code >= 400 ? conn.getErrorStream() : conn.getInputStream();
-        byte[] bytes = readBytes(stream, 20 * 1024 * 1024);
-        if (code >= 400) throw new ApiException(code, "upstream_error", "下载图片失败 HTTP " + code);
-        return bytes;
+        activeConnection = conn;
+        try {
+            checkCancelled();
+            int code = conn.getResponseCode();
+            InputStream stream = code >= 400 ? conn.getErrorStream() : conn.getInputStream();
+            byte[] bytes = readBytes(stream, 20 * 1024 * 1024);
+            if (code >= 400) throw new ApiException(code, "upstream_error", "下载图片失败 HTTP " + code);
+            checkCancelled();
+            return bytes;
+        } finally {
+            conn.disconnect();
+            if (activeConnection == conn) activeConnection = null;
+        }
     }
 
     private boolean isSameHost(String url) {
@@ -339,7 +379,14 @@ public final class GatewayClient {
         if (!baseUrl.startsWith("http://") && !baseUrl.startsWith("https://")) {
             throw new ApiException(0, "config", "地址要以 http:// 或 https:// 开头");
         }
+        checkCancelled();
         HttpURLConnection conn = (HttpURLConnection) new URL(baseUrl + path).openConnection();
+        activeConnection = conn;
+        if (cancelled) {
+            conn.disconnect();
+            activeConnection = null;
+            throw new ApiException(499, "cancelled", "图片任务已取消");
+        }
         conn.setConnectTimeout(20_000);
         conn.setReadTimeout(timeoutMs);
         conn.setRequestMethod(method);

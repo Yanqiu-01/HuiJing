@@ -10,6 +10,9 @@ public class RetryTest {
    if(got!=want)throw new AssertionError("HTTP "+c);
   }
   if((Boolean)m.invoke(null,new GatewayClient.ApiException(502,"content_policy_error","blocked")))throw new AssertionError("policy");
-  System.out.println("PASS: retry status matrix (9 cases) + policy refusal");
+  GatewayClient cancelled = new GatewayClient("http://127.0.0.1:1", "test", 30);
+  cancelled.cancel();
+  if (!cancelled.isCancelled()) throw new AssertionError("cancel flag");
+  System.out.println("PASS: retry status matrix (9 cases) + policy refusal + cancellation flag");
  }
 }

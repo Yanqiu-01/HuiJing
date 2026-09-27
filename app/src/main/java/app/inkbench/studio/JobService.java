@@ -16,6 +16,8 @@ public final class JobService extends Service {
     private static final int NOTE=41;
     private static volatile boolean running;
     private volatile boolean stopAfterCurrent, terminating;
+    private volatile GatewayClient currentClient;
+    private volatile Thread workerThread;
     private PowerManager.WakeLock wakeLock;
     private long started;
     private String lastId="";
@@ -30,12 +32,25 @@ public final class JobService extends Service {
     public int onStartCommand(Intent intent, int flags, int startId) {
         if (intent != null && "STOP_AFTER_CURRENT".equals(intent.getAction())) {
             stopAfterCurrent=true;
-            if (running) state(true,"已请求停止：当前请求结束后不再生成下一张");
+            terminating=true;
+            GatewayClient client=currentClient;
+            if (client != null) client.cancel();
+            Thread worker=workerThread;
+            if (worker != null) worker.interrupt();
+            if (running) state(true,"正在中断当前请求，不会再生成下一张");
             else stopSelf();
             return START_NOT_STICKY;
         }
         if (running) return START_NOT_STICKY;
         if (intent==null) { stopSelf(); return START_NOT_STICKY; }
+        stopAfterCurrent=false;
+        terminating=false;
+        made=0;
+        lastId="";
+        currentImage=0;
+        albumSaved=0;
+        albumFailed=0;
+        albumError="";
         total=Math.max(1,Math.min(4,intent.getIntExtra(EXTRA_COUNT,1)));
         final String base=intent.getStringExtra(EXTRA_BASE), key=intent.getStringExtra(EXTRA_KEY),
                 prompt=intent.getStringExtra(EXTRA_PROMPT), size=intent.getStringExtra(EXTRA_SIZE),
@@ -65,6 +80,8 @@ public final class JobService extends Service {
                 GatewayClient client=new GatewayClient(base,key,timeout).withProgress(updateText -> {
                     if (!terminating) state(true, "第 " + currentImage + "/" + total + " 张 · " + updateText);
                 });
+                currentClient=client;
+                workerThread=Thread.currentThread();
                 GalleryStore gallery=new GalleryStore(getApplicationContext());
                 for(int i=1;i<=total;i++) {
                     if(stopAfterCurrent || terminating) break;
@@ -72,6 +89,9 @@ public final class JobService extends Service {
                     state(true,"正在生成 "+i+"/"+total+" · 已保存 "+made+" 张");
                     List<GatewayClient.ImageItem> images=client.generate(
                             BatchPromptPolicy.compose(prompt, batchPromptLevel, i - 1), size, quality);
+                    if (client.isCancelled() || terminating || stopAfterCurrent) {
+                        throw new GatewayClient.ApiException(499, "cancelled", "图片任务已取消");
+                    }
                     GatewayClient.ImageItem first=images.get(0);
                     GalleryStore.Entry entry=gallery.save(first.bytes,prompt,size,"generate",first.conversationId);
                     lastId=entry.id; made++;
@@ -86,11 +106,18 @@ public final class JobService extends Service {
                 }
                 message=(stopAfterCurrent?"批次已停止":"生成完成")+" · 已保存 "+made+"/"+total+" 张";
             } catch(Exception e) {
-                message="已保存 "+made+"/"+total+" 张；任务中断："+detail(e);
+                if (terminating || (e instanceof GatewayClient.ApiException
+                        && ((GatewayClient.ApiException)e).status == 499)) {
+                    message="任务已中断 · 已保存 "+made+"/"+total+" 张";
+                } else {
+                    message="已保存 "+made+"/"+total+" 张；任务中断："+detail(e);
+                }
             }
+            currentClient=null;
+            workerThread=null;
             message += " · 系统相册「绘境」已存 " + albumSaved + " 张";
             if(albumFailed>0) message += "；"+albumFailed+" 张相册保存失败，应用内原图保留，可点补存。"+albumError;
-            if(!terminating) state(false,message);
+            state(false,message);
             running=false; release(); stopForeground(false);
             try { ((NotificationManager)getSystemService(NOTIFICATION_SERVICE)).notify(NOTE,notification(message,false)); }
             catch(Exception ignored) { }
@@ -128,12 +155,20 @@ public final class JobService extends Service {
     private void release() { if(wakeLock!=null && wakeLock.isHeld()) wakeLock.release(); }
     @Override public void onTimeout(int startId,int type) {
         terminating=true; stopAfterCurrent=true;
+        GatewayClient client=currentClient;
+        if (client != null) client.cancel();
+        Thread worker=workerThread;
+        if (worker != null) worker.interrupt();
         state(false,"系统限制了后台运行时间；已保存的图片保留，请检查画册，不会自动重发请求");
         running=false; release(); stopForeground(true); stopSelf();
     }
     @Override public void onDestroy() {
         if(running) {
             terminating=true; stopAfterCurrent=true;
+            GatewayClient client=currentClient;
+            if (client != null) client.cancel();
+            Thread worker=workerThread;
+            if (worker != null) worker.interrupt();
             state(false,"服务已停止；已保存的图片保留，请检查画册");
         }
         running=false; release(); super.onDestroy();

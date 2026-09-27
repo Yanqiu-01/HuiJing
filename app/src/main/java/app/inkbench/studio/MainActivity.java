@@ -317,7 +317,7 @@ public class MainActivity extends Activity {
         actions.addView(gap(8));
         actions.addView(generateButton, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1.6f));
         composer.addView(actions);
-        stopButton = button("当前张完成后停止", false);
+        stopButton = button("立即中断当前张", false);
         stopButton.setVisibility(View.GONE);
         stopButton.setOnClickListener(v -> {
             if (JobService.isRunning()) {
