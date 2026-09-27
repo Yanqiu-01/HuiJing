@@ -19,7 +19,11 @@ public class VisualPromptTest {
   has(summary,"一个可见的象征物");
 
   String ideas=VisualPrompt.ideaRules();
-  has(ideas,"真正不同");has(ideas,"一个主光源");has(ideas,"具体材质");
+  has(ideas,"明显不同");has(ideas,"不要套用固定的叙事、特写、环境三分法");
+  has(ideas,"不强迫非叙事主题编造动作");has(ideas,"静物、建筑、自然、食物、产品、图案和抽象主题");
+  has(ideas,"具体细节");
+  if(ideas.contains("强行加入人物") || ideas.contains("每条只写一个瞬间、一个明确景别和一个主光源"))
+    throw new AssertionError("idea rules still force a narrow scene template");
   String gateway=VisualPrompt.gatewayRules();
   has(gateway,"不新增未要求的角色、道具或Logo");
   has(gateway,"主光源方向与前文一致");
