@@ -3,41 +3,41 @@ import app.inkbench.studio.BatchPromptPolicy;
 public final class BatchPromptPolicyTest {
     public static void main(String[] args) {
         String original = "一只猫坐在窗边";
-        if (!original.equals(BatchPromptPolicy.compose(original, 35, 0))) throw new AssertionError("first image changed");
-        if (!original.equals(BatchPromptPolicy.compose(original, 0, 1))) throw new AssertionError("zero level changed");
-        if (!"".equals(BatchPromptPolicy.compose("", 100, 1))) throw new AssertionError("empty prompt changed");
-        String low = BatchPromptPolicy.compose(original, 20, 1);
-        String mid = BatchPromptPolicy.compose(original, 50, 1);
-        String high = BatchPromptPolicy.compose(original, 100, 1);
-        String second = BatchPromptPolicy.compose(original, 50, 2);
-        String third = BatchPromptPolicy.compose(original, 50, 3);
-        if (!low.contains("轻微")) throw new AssertionError("low policy");
-        if (!mid.contains("略高于主体的机位")) throw new AssertionError("mid policy");
-        if (!high.contains("略低机位")) throw new AssertionError("high policy");
-        if (!mid.contains("主体、身份、数量、动作、关系和剧情保持不变")) throw new AssertionError("constraint");
-        if (!mid.startsWith(original + "。")) throw new AssertionError("original not preserved");
-        if (mid.equals(second) || mid.equals(third) || second.equals(third)) throw new AssertionError("batch plans repeated");
-        String lockedCamera = BatchPromptPolicy.compose("正面构图，全身镜头，红色外套", 100, 1);
-        if (!lockedCamera.contains("不改变指定机位与景别")) throw new AssertionError("camera constraint ignored");
-        String lockedCamera2 = BatchPromptPolicy.compose("正面全身照，红色外套", 100, 2);
-        if (lockedCamera.equals(lockedCamera2)) throw new AssertionError("locked camera fallback repeated");
-        String lockedLight = BatchPromptPolicy.compose("保持逆光，人物肖像", 100, 1);
-        if (!lockedLight.contains("保持提示词指定的光线不变")) throw new AssertionError("light constraint ignored");
-        String ordinaryNight = BatchPromptPolicy.compose("夜景中的人物肖像", 100, 1);
-        if (ordinaryNight.contains("保持提示词指定的光线不变")) throw new AssertionError("ordinary lighting description treated as locked");
-        String[] batch = new String[4];
-        for (int i = 0; i < batch.length; i++) batch[i] = BatchPromptPolicy.compose(original, 100, i);
-        if (!batch[0].equals(original)) throw new AssertionError("request one changed");
-        if (!batch[1].contains("从略低机位拍摄") || !batch[2].contains("三分之二侧向机位")
-                || !batch[3].contains("较高的斜向机位")) throw new AssertionError("three distinct plans missing");
-        for (int i = 1; i < batch.length; i++) {
-            if (batch[i].equals(batch[0])) throw new AssertionError("request variation missing at " + i);
-            for (int j = i + 1; j < batch.length; j++) {
-                if (batch[i].equals(batch[j])) throw new AssertionError("request plans repeated");
-            }
-        }
+        long seed = 123456789L;
+
+        if (!original.equals(BatchPromptPolicy.compose(original, 35, 0, seed))) throw new AssertionError("first image changed");
+        if (!original.equals(BatchPromptPolicy.compose(original, 0, 1, seed))) throw new AssertionError("zero level changed");
+        if (!"".equals(BatchPromptPolicy.compose("", 100, 1, seed))) throw new AssertionError("empty prompt changed");
+
+        String low = BatchPromptPolicy.compose(original, 20, 1, seed);
+        String mid = BatchPromptPolicy.compose(original, 50, 1, seed);
+        String high = BatchPromptPolicy.compose(original, 100, 1, seed);
+        if (!low.contains("视觉重心") && !low.contains("主体") && !low.contains("呼吸感") && !low.contains("构图")) throw new AssertionError("low composition variation missing");
+        if (!low.contains("色") || low.contains("材质表现偏哑光")) throw new AssertionError("low-level dimension count wrong");
+        if (!mid.contains("光") || !mid.contains("环境") || mid.contains("捕捉更自然的瞬间表情")) throw new AssertionError("mid-level dimensions wrong");
+        if (!high.contains("材质") || !high.contains("视觉焦点") || !high.contains("瞬间表情")) throw new AssertionError("high-level variation too conservative");
+        if (!high.startsWith(original + "。")) throw new AssertionError("original prompt not preserved");
+        if (!high.contains("主体、身份、数量、核心动作、关系、剧情、文字内容和画幅")) throw new AssertionError("hard constraints missing");
+        if (!high.contains("不要新增角色、道具、文字、Logo或水印")) throw new AssertionError("guardrail missing");
+
+        String image2 = BatchPromptPolicy.compose(original, 100, 1, seed);
+        String image3 = BatchPromptPolicy.compose(original, 100, 2, seed);
+        String image4 = BatchPromptPolicy.compose(original, 100, 3, seed);
+        if (image2.equals(image3) || image2.equals(image4) || image3.equals(image4)) throw new AssertionError("batch variants repeated");
+        if (!image2.equals(BatchPromptPolicy.compose(original, 100, 1, seed))) throw new AssertionError("same image is not deterministic");
+        String nextBatch = BatchPromptPolicy.compose(original, 100, 1, seed + 1);
+        if (image2.equals(nextBatch)) throw new AssertionError("new batch seed did not vary profile");
+
+        String locked = "一位女性坐在窗边，保持正面全身构图，固定蓝绿色配色，保持逆光，表情平静，核心动作不变";
+        String guarded = BatchPromptPolicy.compose(locked, 100, 1, seed);
+        if (!guarded.startsWith(locked + "。")) throw new AssertionError("original constraints not preserved");
+        if (guarded.contains("冷蓝和灰紫") || guarded.contains("红色为主") || guarded.contains("暖色主光")) throw new AssertionError("locked palette/light contradicted");
+        if (!guarded.contains("只改变未被用户锁定的视觉表现")) throw new AssertionError("locked dimensions policy missing");
+        String ordinaryNight = BatchPromptPolicy.compose("夜景中的人物肖像", 100, 1, seed);
+        if (!ordinaryNight.contains("采用自然环境色") && !ordinaryNight.contains("色彩关系")) throw new AssertionError("ordinary context over-locked");
+
         if (BatchPromptPolicy.clamp(-2) != 0 || BatchPromptPolicy.clamp(101) != 100) throw new AssertionError("clamp");
         if (!"0.35".equals(BatchPromptPolicy.displayValue(35))) throw new AssertionError("display");
-        System.out.println("PASS: new batch prompt policy keeps first image unchanged and clamps levels");
+        System.out.println("PASS: batch-seeded multi-dimensional prompt variation, hard constraints, intensity tiers, and retry determinism");
     }
 }

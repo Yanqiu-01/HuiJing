@@ -58,6 +58,7 @@ public final class JobService extends Service {
         final int timeout=intent.getIntExtra(EXTRA_TIMEOUT,360);
         final int batchPromptLevel=BatchPromptPolicy.clamp(
                 intent.getIntExtra(EXTRA_BATCH_PROMPT_LEVEL, BatchPromptPolicy.DEFAULT_LEVEL));
+        final long batchSeed=java.util.concurrent.ThreadLocalRandom.current().nextLong();
         started=System.currentTimeMillis();
         running=true;
         try {
@@ -88,7 +89,7 @@ public final class JobService extends Service {
                     currentImage=i;
                     state(true,"正在生成 "+i+"/"+total+" · 已保存 "+made+" 张");
                     List<GatewayClient.ImageItem> images=client.generate(
-                            BatchPromptPolicy.compose(prompt, batchPromptLevel, i - 1), size, quality);
+                            BatchPromptPolicy.compose(prompt, batchPromptLevel, i - 1, batchSeed), size, quality);
                     if (client.isCancelled() || terminating || stopAfterCurrent) {
                         throw new GatewayClient.ApiException(499, "cancelled", "图片任务已取消");
                     }
