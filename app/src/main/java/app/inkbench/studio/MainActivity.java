@@ -747,9 +747,10 @@ public class MainActivity extends Activity {
         spinner.addOnLayoutChangeListener((view, left, top, right, bottom, oldLeft, oldTop, oldRight, oldBottom) -> {
             int width = right - left;
             if (width <= 0) return;
-            int inset = dp(12);
-            spinner.setDropDownHorizontalOffset(-inset);
-            spinner.setDropDownWidth(width + inset * 2);
+            // Keep the popup aligned to the actual Spinner bounds. Expanding it
+            // and applying a negative offset made it drift inside padded cards.
+            spinner.setDropDownHorizontalOffset(0);
+            spinner.setDropDownWidth(width);
         });
         return spinner;
     }

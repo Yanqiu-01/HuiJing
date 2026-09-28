@@ -283,7 +283,15 @@ public final class GatewayClient {
         String selectedModel = imageModel == null ? "" : imageModel.trim();
         if (selectedModel.length() == 0) selectedModel = "gpt-image-2";
         body.put("model", selectedModel);
-        String raw = postJsonRetry("/v1/images/generations", body);
+        String raw;
+        try {
+            raw = postJsonRetry("/v1/images/generations", body);
+        } catch (ApiException e) {
+            if (!isUnsupportedAspectRatio(e) || !body.has("size")) throw e;
+            body.remove("size");
+            progress("网关不接受尺寸/比例参数，改用模型默认比例重试");
+            raw = postJsonRetry("/v1/images/generations", body);
+        }
         try {
             return decodeResponse(raw);
         } catch (ApiException e) {
@@ -354,6 +362,19 @@ public final class GatewayClient {
             }
         }
         throw last;
+    }
+
+    private static boolean isUnsupportedAspectRatio(ApiException e) {
+        if (e == null || (e.status != 400 && e.status != 422)) return false;
+        String type = e.type == null ? "" : e.type.toLowerCase(java.util.Locale.US);
+        String message = e.getMessage() == null ? "" : e.getMessage().toLowerCase(java.util.Locale.US);
+        boolean mentionsDimension = message.contains("aspect_ratio") || message.contains("aspect ratio")
+                || message.contains("size") || type.contains("aspect_ratio") || type.contains("size");
+        boolean rejectsDimension = message.contains("unsupported") || message.contains("not supported")
+                || message.contains("does not support") || message.contains("not allowed")
+                || message.contains("unrecognized") || message.contains("unknown parameter")
+                || message.contains("invalid") || message.contains("不支持") || message.contains("不受支持");
+        return mentionsDimension && rejectsDimension;
     }
 
     private static boolean shouldRetry(ApiException e) {
