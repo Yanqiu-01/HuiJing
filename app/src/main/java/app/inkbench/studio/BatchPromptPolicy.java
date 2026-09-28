@@ -26,8 +26,30 @@ public final class BatchPromptPolicy {
             "把视觉重心放在主体与背景交界处的关系上"
     };
 
+    private static final String[] VIEWS = {
+            "采用略高机位观察主体与环境的关系",
+            "采用略低机位，让主体在画面中更有存在感",
+            "从主体侧前方取景，保留清楚的空间纵深",
+            "采用三分之二侧向视角，避免正面摆拍",
+            "从较远的观察距离取景，让环境参与叙事",
+            "采用贴近主体但不改变画幅的观察视角",
+            "把视线引向主体与环境交界的位置",
+            "采用具有方向性的斜向视点，避免平铺直叙"
+    };
+
+    private static final String[] SPACES = {
+            "让主体约占画面的三分之一，环境承担明显的空间信息",
+            "让主体占据画面主要区域，同时保留可辨认的前景和背景",
+            "拉开主体与背景的距离，形成清楚的前景、中景、远景",
+            "使用前景遮挡或框景制造层次，但不添加新的物件",
+            "把大部分视觉重量放在环境，主体作为明确的视觉锚点",
+            "让主体与最近的已有环境元素形成尺度对照",
+            "保留一侧较大的留白，让视线有明确的移动路径",
+            "使用不对称的空间分配，避免与其他图片只做细节差异"
+    };
+
     private static final String[] COLORS = {
-            "以低饱和青灰为主，保留一处温暖色彩作为视觉锚点",
+        "以低饱和青灰为主，保留一处温暖色彩作为视觉锚点",
             "采用土黄、赭红和深褐的自然色阶，避免鲜艳塑料感",
             "以冷蓝和灰紫建立安静的色彩关系，局部保留肤色或主体固有色",
             "采用米白、浅绿和木色的柔和色调，层次靠明度区分",
@@ -106,27 +128,31 @@ public final class BatchPromptPolicy {
                 "俯拍镜头", "仰拍镜头", "固定机位", "保持平视", "保持俯视", "保持仰视",
                 "广角镜头", "长焦镜头");
         boolean lightLocked = containsAny(base, "保持逆光", "保持侧光", "保持顺光", "固定主光方向",
-                "不要改变光线", "光线方向保持不变", "必须是夕阳", "必须是日出", "必须是日落");
-        boolean colorLocked = containsAny(base, "配色", "色彩", "色调", "主色", "红色", "蓝色", "绿色",
-                "黄色", "黑白", "单色", "暖色", "冷色");
-        boolean materialLocked = containsAny(base, "材质", "纸纹", "木纹", "金属", "玻璃", "皮肤质感",
-                "粗糙", "光滑", "水彩", "水墨", "油画");
-        boolean emotionLocked = containsAny(base, "表情", "微笑", "哭泣", "悲伤", "愤怒", "平静", "情绪",
-                "开心", "忧郁");
+                "不要改变光线", "光线方向保持不变", "必须是夕阳", "必须是日出", "必须是日落",
+                "固定光线", "光线必须");
+        boolean colorLocked = containsAny(base, "固定配色", "配色必须", "色彩必须", "色调必须", "主色必须",
+                "必须是红色", "必须是蓝色", "必须是绿色", "必须是黄色", "固定为黑白", "固定单色",
+                "颜色不能改变", "色彩不能改变", "保持暖色", "保持冷色");
+        boolean materialLocked = containsAny(base, "固定材质", "材质必须", "材质不能改变", "必须是纸纹",
+                "必须是木纹", "必须是金属", "必须是玻璃", "固定水彩", "固定水墨", "固定油画");
+        boolean emotionLocked = containsAny(base, "表情必须", "表情不能改变", "情绪必须", "情绪不能改变",
+                "保持微笑", "保持哭泣", "保持悲伤", "保持愤怒", "保持平静", "保持开心", "保持忧郁");
 
         StringBuilder variation = new StringBuilder();
         variation.append("本批次第").append(imageIndex + 1)
-                .append("张是同一主题的独立视觉变体；只改变未被用户锁定的视觉表现，不改变主体、身份、数量、核心动作、关系、剧情、文字内容和画幅。 ");
+                .append("张必须是同一主题的明显独立视觉方案；不能只改变纹理、锐度、微小细节或滤镜。只改变未被用户锁定的视觉表现，不改变主体、身份、数量、核心动作、关系、剧情、文字内容和画幅。 ");
         if (!cameraLocked) variation.append(COMPOSITIONS[profile % COMPOSITIONS.length]).append("；");
-        if (!colorLocked && value >= 20) variation.append(COLORS[(profile * 3 + 1) % COLORS.length]).append("；");
-        if (!lightLocked && value >= 35) variation.append(LIGHTING[(profile * 5 + 2) % LIGHTING.length]).append("；");
-        if (value >= 50) variation.append(ATMOSPHERES[(profile * 7 + 3) % ATMOSPHERES.length]).append("；");
-        if (!materialLocked && value >= 55) variation.append(MATERIALS[(profile * 11 + 4) % MATERIALS.length]).append("；");
-        if (value >= 65) variation.append(FOCUSES[(profile * 13 + 5) % FOCUSES.length]).append("；");
+        if (value >= 20) variation.append(VIEWS[(profile * 3 + 1) % VIEWS.length]).append("；");
+        if (value >= 20) variation.append(SPACES[(profile * 5 + 2) % SPACES.length]).append("；");
+        if (!colorLocked && value >= 35) variation.append(COLORS[(profile * 7 + 3) % COLORS.length]).append("；");
+        if (!lightLocked && value >= 35) variation.append(LIGHTING[(profile * 11 + 4) % LIGHTING.length]).append("；");
+        if (value >= 50) variation.append(ATMOSPHERES[(profile * 13 + 5) % ATMOSPHERES.length]).append("；");
+        if (!materialLocked && value >= 55) variation.append(MATERIALS[(profile * 17 + 6) % MATERIALS.length]).append("；");
+        if (value >= 65) variation.append(FOCUSES[(profile * 19 + 7) % FOCUSES.length]).append("；");
         if (!emotionLocked && value >= 75) {
-            variation.append("保留原动作不变，只捕捉更自然的瞬间表情和情绪张力").append("；");
+            variation.append("保留原动作不变，但选择不同的自然瞬间和情绪张力").append("；");
         }
-        variation.append("不要新增角色、道具、文字、Logo或水印；不要把变化维度写成新的剧情。");
+        variation.append("必须让本张与同批其他图片在视点、空间组织或构图重心上有可见差异；不要新增角色、道具、文字、Logo或水印；不要把变化维度写成新的剧情。");
         return base + "。" + variation.toString();
     }
 

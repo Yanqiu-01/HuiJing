@@ -53,6 +53,9 @@ public class MainActivity extends Activity {
 
     private static final String PREFS = "inkbench";
     private static final int[] COUNTS = new int[]{1, 2, 3, 4};
+    private static final String[] IMAGE_MODEL_PRESETS = new String[]{
+            "gpt-image-2", "grok-imagine", "grok-2-image-1212"
+    };
 
     private static final String[][] SIZES = new String[][]{
             {"1024x1024", "1:1 方形"},
@@ -93,6 +96,11 @@ public class MainActivity extends Activity {
 
     private EditText imageBaseField;
     private EditText imageKeyField;
+    private Spinner imageModelSpinner;
+    private Button refreshImageModelsButton;
+    private TextView imageModelStatus;
+    private java.util.ArrayList<String> imageModels = new java.util.ArrayList<String>();
+    private String imageModel = "gpt-image-2";
     private EditText textBaseField;
     private EditText textKeyField;
     private Spinner textModelSpinner;
@@ -428,6 +436,7 @@ public class MainActivity extends Activity {
         paintStyles();
         paintQuality();
         paintBatchPromptLevel();
+        paintImageModels();
         paintTextModels();
         bindDropdowns();
         applyAppearance();
@@ -453,6 +462,21 @@ public class MainActivity extends Activity {
         body.addView(gap(4));
         body.addView(key);
         if (image) {
+            body.addView(gap(8));
+            body.addView(label("生图模型"));
+            imageModelSpinner = dropdown();
+            body.addView(gap(4));
+            body.addView(imageModelSpinner);
+            LinearLayout imageModelActions = chipRow();
+            refreshImageModelsButton = button("从 /v1/models 刷新", false);
+            refreshImageModelsButton.setTextSize(13);
+            refreshImageModelsButton.setOnClickListener(v -> refreshImageModels());
+            imageModelActions.addView(refreshImageModelsButton, weight());
+            imageModelStatus = hint("独立于文字模型；选择后用于 /v1/images/generations。");
+            body.addView(gap(6));
+            body.addView(imageModelActions);
+            body.addView(imageModelStatus);
+            body.addView(gap(8));
             timeoutField = field("超时秒数，默认 360", false);
             timeoutField.setInputType(InputType.TYPE_CLASS_NUMBER);
             body.addView(gap(8));
@@ -558,6 +582,61 @@ public class MainActivity extends Activity {
         });
     }
 
+
+    private void paintImageModels() {
+        if (imageModelSpinner == null) return;
+        java.util.ArrayList<String> visible = new java.util.ArrayList<String>();
+        for (String preset : IMAGE_MODEL_PRESETS) if (!visible.contains(preset)) visible.add(preset);
+        if (imageModels != null) for (String model : imageModels) if (model != null && model.trim().length() > 0 && !visible.contains(model.trim())) visible.add(model.trim());
+        if (imageModel == null || imageModel.trim().isEmpty()) imageModel = IMAGE_MODEL_PRESETS[0];
+        if (!visible.contains(imageModel)) visible.add(0, imageModel);
+        String[] labels = visible.toArray(new String[0]);
+        int selected = Math.max(0, visible.indexOf(imageModel));
+        setDropdown(imageModelSpinner, labels, selected, position -> {
+            imageModel = labels[position];
+            if (imageModelStatus != null) imageModelStatus.setText("当前生图模型：" + imageModel + " · 保存设置后记住");
+        });
+    }
+
+    private void refreshImageModels() {
+        final String base = imageBaseField.getText().toString().trim();
+        final String key = imageKeyField.getText().toString().trim();
+        if (base.length() == 0 || key.length() == 0) {
+            if (imageModelStatus != null) imageModelStatus.setText("先填写生图接口地址和密钥，再刷新模型");
+            return;
+        }
+        if (refreshImageModelsButton != null) {
+            refreshImageModelsButton.setEnabled(false);
+            refreshImageModelsButton.setText("正在获取…");
+        }
+        if (imageModelStatus != null) imageModelStatus.setText("正在请求生图模型列表…");
+        final int timeout = readTimeout();
+        new Thread(() -> {
+            try {
+                java.util.List<String> found = new GatewayClient(base, key, timeout).listImageModels();
+                runOnUiThread(() -> {
+                    if (destroyed) return;
+                    imageModels.clear();
+                    imageModels.addAll(found);
+                    paintImageModels();
+                    if (imageModelStatus != null) imageModelStatus.setText("已获取 " + imageModels.size() + " 个生图模型 · 当前：" + imageModel);
+                    if (refreshImageModelsButton != null) {
+                        refreshImageModelsButton.setEnabled(true);
+                        refreshImageModelsButton.setText("从 /v1/models 刷新");
+                    }
+                });
+            } catch (Exception e) {
+                runOnUiThread(() -> {
+                    if (destroyed) return;
+                    if (imageModelStatus != null) imageModelStatus.setText("获取生图模型失败：" + shortError(e));
+                    if (refreshImageModelsButton != null) {
+                        refreshImageModelsButton.setEnabled(true);
+                        refreshImageModelsButton.setText("从 /v1/models 刷新");
+                    }
+                });
+            }
+        }, "image-models").start();
+    }
 
     private void paintTextModels() {
         if (textModelSpinner == null) return;
@@ -1016,6 +1095,7 @@ public class MainActivity extends Activity {
         job.putExtra(JobService.EXTRA_PROMPT, prompt);
         job.putExtra(JobService.EXTRA_SIZE, size);
         job.putExtra(JobService.EXTRA_QUALITY, quality);
+        job.putExtra(JobService.EXTRA_IMAGE_MODEL, imageModel);
         job.putExtra(JobService.EXTRA_BATCH_PROMPT_LEVEL, batchPromptLevel);
         job.putExtra(JobService.EXTRA_COUNT, count);
         job.putExtra(JobService.EXTRA_TIMEOUT, timeoutSeconds);
@@ -1294,6 +1374,7 @@ public class MainActivity extends Activity {
         final String oldTextBase = textBaseField.getText().toString();
         final String oldTextKey = textKeyField.getText().toString();
         final String oldTextModel = textModel;
+        final String oldImageModel = imageModel;
         final String oldTimeout = timeoutField.getText().toString();
         final String oldWallpaperUri = wallpaperUri;
         final int oldShade = shadePercent;
@@ -1302,6 +1383,7 @@ public class MainActivity extends Activity {
         final int oldBlur = blurAmount;
         final boolean oldHighRefresh = highRefresh;
         final java.util.ArrayList<String> oldTextModels = new java.util.ArrayList<String>(textModels);
+        final java.util.ArrayList<String> oldImageModels = new java.util.ArrayList<String>(imageModels);
         final LinearLayout content = vertical();
         content.setPadding(dp(16), dp(6), dp(16), dp(8));
         content.addView(text("接口", 17, 0xFF1A1C19));
@@ -1379,6 +1461,10 @@ public class MainActivity extends Activity {
             textModel = oldTextModel;
             textModels.clear();
             textModels.addAll(oldTextModels);
+            imageModel = oldImageModel;
+            imageModels.clear();
+            imageModels.addAll(oldImageModels);
+            paintImageModels();
             paintTextModels();
             timeoutField.setText(oldTimeout);
             wallpaperUri = oldWallpaperUri;
@@ -1402,6 +1488,8 @@ public class MainActivity extends Activity {
             android.view.Window window = dialog.getWindow();
             if (window != null) window.setLayout((int)(getResources().getDisplayMetrics().widthPixels * 0.94f),
                     (int)(getResources().getDisplayMetrics().heightPixels * 0.86f));
+            if (imageBaseField.getText().toString().trim().length() > 0
+                    && imageKeyField.getText().toString().trim().length() > 0 && imageModels.isEmpty()) refreshImageModels();
             if (textEndpoint().length() > 0 && textApiKey().length() > 0 && textModels.isEmpty()) refreshTextModels();
         });
         dialog.show();
@@ -1638,6 +1726,7 @@ public class MainActivity extends Activity {
         String savedImageBase = prefs.getString("imageBase", legacyBase);
         imageBaseField.setText(savedImageBase);
         imageKeyField.setText(prefs.getString("imageKey", legacyKey));
+        imageModel = prefs.getString("imageModel", IMAGE_MODEL_PRESETS[0]);
         textBaseField.setText(prefs.getString("textBase", ""));
         textKeyField.setText(prefs.getString("textKey", ""));
         textModel = prefs.getString("textModel", GatewayClient.DEFAULT_TEXT_MODEL);
@@ -1658,6 +1747,7 @@ public class MainActivity extends Activity {
         paintSizes();
         paintCounts();
         paintStyles();
+        paintImageModels();
         paintTextModels();
         paintBatchPromptLevel();
         refreshSummaries();
@@ -1698,6 +1788,7 @@ public class MainActivity extends Activity {
         getSharedPreferences(PREFS, MODE_PRIVATE).edit()
                 .putString("imageBase", imageBase)
                 .putString("imageKey", imageKey)
+                .putString("imageModel", imageModel)
                 .putString("textBase", textBaseField.getText().toString().trim())
                 .putString("textKey", textKeyField.getText().toString().trim())
                 .putString("textModel", textModel)

@@ -110,8 +110,17 @@ public final class GatewayClient {
      */
     public static final String DEFAULT_TEXT_MODEL = "gpt-5.6-sol";
 
-    /** Fetches the models exposed by this endpoint. No key or model is persisted here. */
+    /** Fetches text models exposed by this endpoint. No key or model is persisted here. */
     public List<String> listModels() throws Exception {
+        return listModelsInternal(false);
+    }
+
+    /** Fetches image-capable model ids, including Grok/Imagine-style ids. */
+    public List<String> listImageModels() throws Exception {
+        return listModelsInternal(true);
+    }
+
+    private List<String> listModelsInternal(boolean imageOnly) throws Exception {
         HttpURLConnection conn = open("/v1/models", "GET");
         try {
             String raw = readResponse(conn);
@@ -123,15 +132,44 @@ public final class GatewayClient {
                     JSONObject item = data.optJSONObject(i);
                     if (item == null) continue;
                     String id = item.optString("id", "").trim();
-                    if (id.length() > 0 && !id.toLowerCase(java.util.Locale.US).contains("image")) ids.add(id);
+                    if (id.length() == 0) continue;
+                    boolean image = isImageModel(item, id);
+                    if (imageOnly == image) ids.add(id);
                 }
             }
-            if (ids.isEmpty()) throw new ApiException(200, "empty_models", "文字接口没有返回可用模型");
+            if (ids.isEmpty()) {
+                throw new ApiException(200, "empty_models",
+                        imageOnly ? "接口没有返回可用图像模型" : "文字接口没有返回可用模型");
+            }
             return new ArrayList<String>(ids);
         } finally {
             conn.disconnect();
             if (activeConnection == conn) activeConnection = null;
         }
+    }
+
+    private static boolean isImageModel(JSONObject item, String id) {
+        String lower = id.toLowerCase(java.util.Locale.US);
+        if (lower.contains("image") || lower.contains("imagine") || lower.contains("flux")
+                || lower.contains("dall") || lower.contains("imagen") || lower.contains("ideogram")) return true;
+        String type = item.optString("type", "").toLowerCase(java.util.Locale.US);
+        if (type.contains("image_generation") || type.contains("image-generation")) return true;
+        String capability = item.optString("capability", "").toLowerCase(java.util.Locale.US);
+        if (capability.contains("image_generation") || capability.contains("image-generation")) return true;
+        Object capabilities = item.opt("capabilities");
+        if (capabilities instanceof JSONObject) {
+            JSONObject c = (JSONObject) capabilities;
+            if (c.optBoolean("image_generation", false) || c.optBoolean("imageGeneration", false)
+                    || c.optBoolean("text_to_image", false) || c.optBoolean("textToImage", false)) return true;
+        } else if (capabilities instanceof org.json.JSONArray) {
+            org.json.JSONArray list = (org.json.JSONArray) capabilities;
+            for (int i = 0; i < list.length(); i++) {
+                String value = list.optString(i, "").toLowerCase(java.util.Locale.US);
+                if (value.contains("image_generation") || value.contains("image-generation")
+                        || value.contains("text_to_image") || value.contains("text-to-image")) return true;
+            }
+        }
+        return false;
     }
 
     public String enhancePrompt(String idea, String styleNote, String textModel) throws Exception {
@@ -232,13 +270,19 @@ public final class GatewayClient {
     }
 
     public List<ImageItem> generate(String prompt, String size, String quality) throws Exception {
+        return generate(prompt, size, quality, "gpt-image-2");
+    }
+
+    public List<ImageItem> generate(String prompt, String size, String quality, String imageModel) throws Exception {
         checkCancelled();
         JSONObject body = new JSONObject();
         body.put("prompt", applyQuality(prompt, quality));
         body.put("size", qualitySize(size, quality));
         body.put("n", 1);
         body.put("response_format", "b64_json");
-        body.put("model", "gpt-image-2");
+        String selectedModel = imageModel == null ? "" : imageModel.trim();
+        if (selectedModel.length() == 0) selectedModel = "gpt-image-2";
+        body.put("model", selectedModel);
         String raw = postJsonRetry("/v1/images/generations", body);
         try {
             return decodeResponse(raw);

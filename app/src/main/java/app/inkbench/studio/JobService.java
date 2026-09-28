@@ -11,7 +11,7 @@ public final class JobService extends Service {
     static final String STATE = "image_job";
     static final String EXTRA_BASE="base", EXTRA_KEY="key", EXTRA_PROMPT="prompt",
             EXTRA_SIZE="size", EXTRA_COUNT="count", EXTRA_TIMEOUT="timeout", EXTRA_QUALITY="quality",
-            EXTRA_BATCH_PROMPT_LEVEL="batch_prompt_level";
+            EXTRA_IMAGE_MODEL="image_model", EXTRA_BATCH_PROMPT_LEVEL="batch_prompt_level";
     private static final String CHANNEL="inkbench-gen";
     private static final int NOTE=41;
     private static volatile boolean running;
@@ -54,7 +54,7 @@ public final class JobService extends Service {
         total=Math.max(1,Math.min(4,intent.getIntExtra(EXTRA_COUNT,1)));
         final String base=intent.getStringExtra(EXTRA_BASE), key=intent.getStringExtra(EXTRA_KEY),
                 prompt=intent.getStringExtra(EXTRA_PROMPT), size=intent.getStringExtra(EXTRA_SIZE),
-                quality=intent.getStringExtra(EXTRA_QUALITY);
+                quality=intent.getStringExtra(EXTRA_QUALITY), imageModel=intent.getStringExtra(EXTRA_IMAGE_MODEL);
         final int timeout=intent.getIntExtra(EXTRA_TIMEOUT,360);
         final int batchPromptLevel=BatchPromptPolicy.clamp(
                 intent.getIntExtra(EXTRA_BATCH_PROMPT_LEVEL, BatchPromptPolicy.DEFAULT_LEVEL));
@@ -89,7 +89,7 @@ public final class JobService extends Service {
                     currentImage=i;
                     state(true,"正在生成 "+i+"/"+total+" · 已保存 "+made+" 张");
                     List<GatewayClient.ImageItem> images=client.generate(
-                            BatchPromptPolicy.compose(prompt, batchPromptLevel, i - 1, batchSeed), size, quality);
+                            BatchPromptPolicy.compose(prompt, batchPromptLevel, i - 1, batchSeed), size, quality, imageModel);
                     if (client.isCancelled() || terminating || stopAfterCurrent) {
                         throw new GatewayClient.ApiException(499, "cancelled", "图片任务已取消");
                     }

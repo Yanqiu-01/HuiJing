@@ -12,10 +12,11 @@ public final class BatchPromptPolicyTest {
         String low = BatchPromptPolicy.compose(original, 20, 1, seed);
         String mid = BatchPromptPolicy.compose(original, 50, 1, seed);
         String high = BatchPromptPolicy.compose(original, 100, 1, seed);
-        if (!low.contains("视觉重心") && !low.contains("主体") && !low.contains("呼吸感") && !low.contains("构图")) throw new AssertionError("low composition variation missing");
-        if (!low.contains("色") || low.contains("材质表现偏哑光")) throw new AssertionError("low-level dimension count wrong");
+        if (!low.contains("机位") && !low.contains("视角") && !low.contains("构图")) throw new AssertionError("low viewpoint variation missing");
+        if (!low.contains("画面的") && !low.contains("空间") && !low.contains("留白")) throw new AssertionError("low spatial variation missing");
+        if (low.contains("材质表现偏哑光")) throw new AssertionError("low-level variation too detailed");
         if (!mid.contains("光") || !mid.contains("环境") || mid.contains("捕捉更自然的瞬间表情")) throw new AssertionError("mid-level dimensions wrong");
-        if (!high.contains("材质") || !high.contains("视觉焦点") || !high.contains("瞬间表情")) throw new AssertionError("high-level variation too conservative");
+        if (!high.contains("材质") || !high.contains("视觉焦点") || !high.contains("不同的自然瞬间")) throw new AssertionError("high-level variation too conservative");
         if (!high.startsWith(original + "。")) throw new AssertionError("original prompt not preserved");
         if (!high.contains("主体、身份、数量、核心动作、关系、剧情、文字内容和画幅")) throw new AssertionError("hard constraints missing");
         if (!high.contains("不要新增角色、道具、文字、Logo或水印")) throw new AssertionError("guardrail missing");
@@ -34,7 +35,8 @@ public final class BatchPromptPolicyTest {
         if (guarded.contains("冷蓝和灰紫") || guarded.contains("红色为主") || guarded.contains("暖色主光")) throw new AssertionError("locked palette/light contradicted");
         if (!guarded.contains("只改变未被用户锁定的视觉表现")) throw new AssertionError("locked dimensions policy missing");
         String ordinaryNight = BatchPromptPolicy.compose("夜景中的人物肖像", 100, 1, seed);
-        if (!ordinaryNight.contains("采用自然环境色") && !ordinaryNight.contains("色彩关系")) throw new AssertionError("ordinary context over-locked");
+        if (!ordinaryNight.contains("视点") && !ordinaryNight.contains("视角") && !ordinaryNight.contains("机位")) throw new AssertionError("ordinary context lost viewpoint variation");
+        if (!ordinaryNight.contains("主体") || !ordinaryNight.contains("环境")) throw new AssertionError("ordinary context lost spatial variation");
 
         if (BatchPromptPolicy.clamp(-2) != 0 || BatchPromptPolicy.clamp(101) != 100) throw new AssertionError("clamp");
         if (!"0.35".equals(BatchPromptPolicy.displayValue(35))) throw new AssertionError("display");
