@@ -16,13 +16,28 @@ public final class PreviewLoader {
         @Override protected int sizeOf(String k, Bitmap b) { return b.getByteCount(); }
     };
     private volatile boolean closed;
-    public void load(ImageView view,File file,int target,boolean animate) {
+    public interface LoadListener { void onLoaded(Bitmap bitmap); }
+
+    public void load(ImageView view, File file, int target, boolean animate) {
+        load(view, file, target, animate, null, false);
+    }
+
+    public void load(ImageView view, File file, int target, boolean animate, LoadListener listener) {
+        load(view, file, target, animate, listener, false);
+    }
+
+    public void load(ImageView view, File file, int target, boolean animate, LoadListener listener, boolean keepPrevious) {
         final String key=file.getAbsolutePath()+"|"+target+"|"+file.lastModified();
         view.setTag(key);
         Bitmap hit=cache.get(key);
-        if(hit!=null) { view.setImageBitmap(hit); return; }
-        view.setImageDrawable(null);
-        if(closed) return;
+        if(hit!=null) {
+            view.setImageBitmap(hit);
+            if(animate) Motion.appear(view);
+            if(listener!=null) listener.onLoaded(hit);
+            return;
+        }
+        if(!keepPrevious) view.setImageDrawable(null);
+        if(closed) { if(listener!=null) listener.onLoaded(null); return; }
         worker.execute(()->{
             Bitmap bitmap=null;
             try {
@@ -35,10 +50,12 @@ public final class PreviewLoader {
             } catch (RuntimeException | OutOfMemoryError ignored) { }
             final Bitmap result=bitmap;
             main.post(()->{
-                if(!closed && key.equals(view.getTag()) && result!=null) {
+                if(closed || !key.equals(view.getTag())) return;
+                if(result!=null) {
                     view.setImageBitmap(result);
                     if(animate) Motion.appear(view);
                 }
+                if(listener!=null) listener.onLoaded(result);
             });
         });
     }

@@ -3,31 +3,29 @@ package app.inkbench.studio;
 import android.app.Activity;
 import android.graphics.Typeface;
 import android.os.Bundle;
-import android.view.GestureDetector;
 import android.view.Gravity;
-import android.view.MotionEvent;
 import android.view.View;
-import android.widget.ImageView;
+import android.widget.FrameLayout;
 import android.widget.LinearLayout;
 import android.widget.ScrollView;
 import android.widget.TextView;
 
 import java.io.File;
 
-/** Full-screen gallery viewer with previous/next navigation. */
+/** Full-screen viewer: paging, pinch/double-tap zoom, and captions revealed with the image. */
 public class ViewerActivity extends Activity {
     private PreviewLoader previews;
     private String[] paths = new String[0];
     private String[] prompts = new String[0];
     private int index;
-    private float touchStartX;
-    private float touchStartY;
-    private boolean horizontalSwipe;
-    private ImageView image;
+    private ZoomImageView image;
     private TextView caption;
     private TextView position;
     private TextView previous;
     private TextView next;
+    private LinearLayout top;
+    private LinearLayout controls;
+    private ScrollView captionScroll;
 
     @Override protected void onCreate(Bundle state) {
         super.onCreate(state);
@@ -53,7 +51,7 @@ public class ViewerActivity extends Activity {
             return insets;
         });
 
-        LinearLayout top = row();
+        top = row();
         TextView back = label("‹  返回", 16);
         back.setOnClickListener(v -> finish());
         position = label("", 14);
@@ -61,21 +59,22 @@ public class ViewerActivity extends Activity {
         top.addView(position);
         root.addView(top);
 
-        ScrollView scroll = new ScrollView(this);
-        LinearLayout body = new LinearLayout(this);
-        body.setOrientation(LinearLayout.VERTICAL);
-        image = new ImageView(this);
-        image.setAdjustViewBounds(true);
-        image.setScaleType(ImageView.ScaleType.FIT_CENTER);
-        body.addView(image, new LinearLayout.LayoutParams(-1, -2));
+        FrameLayout stage = new FrameLayout(this);
+        image = new ZoomImageView(this);
+        image.setSwipeListener(direction -> move(direction));
+        image.setTapListener(this::toggleChrome);
+        stage.addView(image, new FrameLayout.LayoutParams(-1, -1));
+        root.addView(stage, new LinearLayout.LayoutParams(-1, 0, 1f));
+
+        captionScroll = new ScrollView(this);
+        captionScroll.setFillViewport(true);
         caption = label("", 15);
         caption.setTextIsSelectable(true);
-        caption.setPadding(dp(20), dp(16), dp(20), dp(24));
-        body.addView(caption);
-        scroll.addView(body);
-        root.addView(scroll, new LinearLayout.LayoutParams(-1, 0, 1f));
+        caption.setPadding(dp(20), dp(12), dp(20), dp(12));
+        captionScroll.addView(caption, new FrameLayout.LayoutParams(-1, -2));
+        root.addView(captionScroll, new LinearLayout.LayoutParams(-1, 0, 0.22f));
 
-        LinearLayout controls = row();
+        controls = row();
         previous = label("‹ 上一张", 16);
         next = label("下一张 ›", 16);
         previous.setGravity(Gravity.START);
@@ -86,45 +85,23 @@ public class ViewerActivity extends Activity {
         controls.addView(next, new LinearLayout.LayoutParams(0, -2, 1f));
         root.addView(controls);
 
-        GestureDetector gestures = new GestureDetector(this, new GestureDetector.SimpleOnGestureListener() {
-            @Override public boolean onDown(MotionEvent event) { return true; }
-            @Override public boolean onScroll(MotionEvent start, MotionEvent end, float distanceX, float distanceY) {
-                return Math.abs(distanceX) > Math.abs(distanceY);
-            }
-            @Override public boolean onFling(MotionEvent start, MotionEvent end, float velocityX, float velocityY) {
-                if (start == null || end == null) return false;
-                float dx = end.getX() - start.getX();
-                if (Math.abs(dx) < dp(48) || Math.abs(dx) < Math.abs(end.getY() - start.getY())) return false;
-                move(dx < 0 ? 1 : -1);
-                return true;
-            }
-        });
-        View.OnTouchListener touch = (v, event) -> {
-            int action = event.getActionMasked();
-            if (action == MotionEvent.ACTION_DOWN) {
-                touchStartX = event.getX();
-                touchStartY = event.getY();
-                horizontalSwipe = false;
-            } else if (!horizontalSwipe) {
-                float dx = Math.abs(event.getX() - touchStartX);
-                float dy = Math.abs(event.getY() - touchStartY);
-                horizontalSwipe = dx > dp(18) && dx > dy;
-            }
-            gestures.onTouchEvent(event);
-            return horizontalSwipe;
-        };
-        image.setOnTouchListener(touch);
-        scroll.setOnTouchListener(touch);
         setContentView(root);
         root.requestApplyInsets();
         showCurrent();
     }
 
     private void move(int delta) {
-        int target = index + delta;
-        if (target < 0 || target >= paths.length) return;
+        int target = pageIndex(index, delta, paths.length);
+        if (target == index) return;
         index = target;
         showCurrent();
+    }
+
+    private void toggleChrome() {
+        boolean show = top.getVisibility() != View.VISIBLE;
+        top.setVisibility(show ? View.VISIBLE : View.GONE);
+        controls.setVisibility(show ? View.VISIBLE : View.GONE);
+        captionScroll.setVisibility(show ? View.VISIBLE : View.GONE);
     }
 
     private void showCurrent() {
@@ -134,8 +111,24 @@ public class ViewerActivity extends Activity {
         previous.setAlpha(previous.isEnabled() ? 1f : 0.35f);
         next.setAlpha(next.isEnabled() ? 1f : 0.35f);
         position.setText(has ? (index + 1) + " / " + paths.length : "没有图片");
-        caption.setText(has && index < prompts.length && prompts[index] != null ? prompts[index] : "");
-        if (has) previews.load(image, new File(paths[index]), 2400, true);
+        if (!has) {
+            caption.setText("");
+            image.setImageDrawable(null);
+            return;
+        }
+        final String text = captionFor(prompts, index);
+        previews.load(image, new File(paths[index]), 2400, true, bitmap -> caption.setText(text), true);
+    }
+
+    static int pageIndex(int current, int delta, int count) {
+        int target = current + delta;
+        if (target < 0 || target >= count) return current;
+        return target;
+    }
+
+    static String captionFor(String[] prompts, int index) {
+        if (prompts == null || index < 0 || index >= prompts.length) return "";
+        return prompts[index] == null ? "" : prompts[index];
     }
 
     private String[] stringArray(String key) {
