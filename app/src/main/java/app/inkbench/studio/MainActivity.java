@@ -30,9 +30,6 @@ import android.widget.ImageView;
 import android.widget.LinearLayout;
 import android.widget.ProgressBar;
 import android.widget.ScrollView;
-import android.widget.Spinner;
-import android.widget.ArrayAdapter;
-import android.widget.AdapterView;
 import android.widget.TextView;
 import android.widget.Toast;
 
@@ -96,14 +93,14 @@ public class MainActivity extends Activity {
 
     private EditText imageBaseField;
     private EditText imageKeyField;
-    private Spinner imageModelSpinner;
+    private AlignedDropdown imageModelSpinner;
     private Button refreshImageModelsButton;
     private TextView imageModelStatus;
     private java.util.ArrayList<String> imageModels = new java.util.ArrayList<String>();
     private String imageModel = "gpt-image-2";
     private EditText textBaseField;
     private EditText textKeyField;
-    private Spinner textModelSpinner;
+    private AlignedDropdown textModelSpinner;
     private Button refreshTextModelsButton;
     private TextView textModelStatus;
     private java.util.ArrayList<String> textModels = new java.util.ArrayList<String>();
@@ -123,10 +120,10 @@ public class MainActivity extends Activity {
     private TextView imageCaret;
     private TextView textCaret;
     private LinearLayout resultBlock;
-    private Spinner sizeSpinner;
-    private Spinner countSpinner;
-    private Spinner styleSpinner;
-    private Spinner qualitySpinner;
+    private AlignedDropdown sizeSpinner;
+    private AlignedDropdown countSpinner;
+    private AlignedDropdown styleSpinner;
+    private AlignedDropdown qualitySpinner;
     private SeekBar batchPromptSeek;
     private TextView batchPromptValue;
     private LinearLayout galleryGrid;
@@ -573,7 +570,7 @@ public class MainActivity extends Activity {
         int selected = style >= 0 && style < STYLES.length ? style : 0;
         setDropdown(styleSpinner, labels, selected, position -> {
             if (position == STYLE_CUSTOM) {
-                // Let the Spinner finish closing its popup before opening an editable dialog.
+                // Let the selection popup finish closing its popup before opening an editable dialog.
                 styleSpinner.post(this::showCustomStyleDialog);
             } else {
                 style = position;
@@ -732,71 +729,13 @@ public class MainActivity extends Activity {
     private interface DropdownChoice { void onChoice(int position); }
     private boolean customStyleDialogOpen;
     private void bindDropdowns() { }
-    private Spinner dropdown() {
-        Spinner spinner = new Spinner(this, Spinner.MODE_DROPDOWN);
-        spinner.setMinimumHeight(dp(48));
-        spinner.setBackground(inputBackground());
-        spinner.setPadding(dp(10), dp(4), dp(10), dp(4));
-        spinner.setDropDownVerticalOffset(dp(6));
-        GradientDrawable popup = new GradientDrawable();
-        popup.setColor(0xF7F7F3EC);
-        popup.setCornerRadius(dp(16));
-        popup.setStroke(dp(1), 0x66FFFFFF);
-        spinner.setPopupBackgroundDrawable(popup);
-        spinner.setElevation(dp(8));
-        spinner.addOnLayoutChangeListener((view, left, top, right, bottom, oldLeft, oldTop, oldRight, oldBottom) -> {
-            int width = right - left;
-            if (width <= 0) return;
-            // Keep the popup aligned to the actual Spinner bounds. Expanding it
-            // and applying a negative offset made it drift inside padded cards.
-            spinner.setDropDownHorizontalOffset(0);
-            spinner.setDropDownWidth(width);
-        });
-        return spinner;
+    private AlignedDropdown dropdown() {
+        AlignedDropdown field = new AlignedDropdown(this);
+        field.setBackground(inputBackground());
+        return field;
     }
-    private void setDropdown(Spinner spinner, String[] labels, int selected, DropdownChoice choice) {
-        ArrayAdapter<String> adapter = new ArrayAdapter<String>(this, android.R.layout.simple_spinner_item, labels) {
-            @Override public View getView(int position, View convertView, ViewGroup parent) {
-                TextView view = (TextView) super.getView(position, convertView, parent);
-                view.setTextColor(0xFF1A1C19);
-                view.setTextSize(15);
-                view.setPadding(dp(6), dp(8), dp(6), dp(8));
-                return view;
-            }
-            @Override public View getDropDownView(int position, View convertView, ViewGroup parent) {
-                TextView view = (TextView) super.getDropDownView(position, convertView, parent);
-                view.setTextColor(0xFF1A1C19);
-                view.setTextSize(15);
-                view.setMinHeight(dp(46));
-                view.setBackgroundColor(Color.TRANSPARENT);
-                view.setPadding(dp(14), dp(10), dp(14), dp(10));
-                return view;
-            }
-        };
-        adapter.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item);
-
-        // Every rebind gets its own token. A delayed callback from an older
-        // rebind must not attach an old choice handler to this Spinner.
-        final Object bindingToken = new Object();
-        spinner.setTag(bindingToken);
-        spinner.setOnItemSelectedListener(null);
-        spinner.setAdapter(adapter);
-        spinner.setSelection(Math.max(0, Math.min(selected, labels.length - 1)), false);
-        final boolean[] armed = new boolean[]{false};
-        final AdapterView.OnItemSelectedListener listener = new AdapterView.OnItemSelectedListener() {
-            public void onItemSelected(AdapterView<?> parent, View view, int position, long id) {
-                if (!armed[0]) return;
-                choice.onChoice(position);
-            }
-            public void onNothingSelected(AdapterView<?> parent) { }
-        };
-        spinner.post(() -> {
-            if (spinner.getTag() != bindingToken) return;
-            spinner.setOnItemSelectedListener(listener);
-            spinner.post(() -> {
-                if (spinner.getTag() == bindingToken) armed[0] = true;
-            });
-        });
+    private void setDropdown(AlignedDropdown field, String[] labels, int selected, DropdownChoice choice) {
+        field.bind(labels, selected, choice::onChoice);
     }
 
     private void showCustomStyleDialog() {
@@ -1690,7 +1629,7 @@ public class MainActivity extends Activity {
     private void refreshBlockBackgrounds(View view) {
         if (view == null) return;
         if (view instanceof EditText) ((EditText) view).setBackground(inputBackground());
-        else if (view instanceof Spinner) ((Spinner) view).setBackground(inputBackground());
+        else if (view instanceof AlignedDropdown) ((AlignedDropdown) view).setBackground(inputBackground());
         else if (view instanceof Button) {
             Button button = (Button) view;
             boolean primary = button.getCurrentTextColor() == 0xFFF7F4EC;
