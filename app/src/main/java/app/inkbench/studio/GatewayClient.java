@@ -63,6 +63,9 @@ public final class GatewayClient {
     private int requestAttempt;
     private long requestStarted;
     private String lastDiagnosticId = "";
+    private String requestModel = "", requestSize = "", responseType = "";
+    private int responseStatus;
+    private final java.util.Set<String> defaultSizeModels = new java.util.HashSet<String>();
     private volatile boolean cancelled;
     private volatile HttpURLConnection activeConnection;
 
@@ -283,14 +286,20 @@ public final class GatewayClient {
         String selectedModel = imageModel == null ? "" : imageModel.trim();
         if (selectedModel.length() == 0) selectedModel = "gpt-image-2";
         body.put("model", selectedModel);
+        requestModel = selectedModel;
+        lastDiagnosticId = "";
+        if (defaultSizeModels.contains(selectedModel)) body.remove("size");
+        requestSize = body.optString("size", "model-default");
         String raw;
         try {
             raw = postJsonRetry("/v1/images/generations", body);
         } catch (ApiException e) {
             if (!isUnsupportedAspectRatio(e) || !body.has("size")) throw e;
             body.remove("size");
+            requestSize = "model-default";
             progress("网关不接受尺寸/比例参数，改用模型默认比例重试");
             raw = postJsonRetry("/v1/images/generations", body);
+            defaultSizeModels.add(selectedModel);
         }
         try {
             return decodeResponse(raw);
@@ -298,7 +307,7 @@ public final class GatewayClient {
             recordDiagnostic("response_parse", "/v1/images/generations", e);
             throw e;
         } catch (Exception e) {
-            ApiException failure = new ApiException(502, "response_parse",
+            ApiException failure = new ApiException(responseStatus, "response_parse",
                     "图片响应解析失败：" + (e.getMessage() == null ? e.getClass().getSimpleName() : e.getMessage()));
             recordDiagnostic("response_parse", "/v1/images/generations", failure);
             throw failure;
@@ -306,7 +315,7 @@ public final class GatewayClient {
     }
 
 
-    /** The gateway has no supported quality field, so quality is expressed in the prompt and size. */
+    /** Quality is expressed in the prompt; the selected dimensions are preserved. */
     private static String applyQuality(String prompt, String quality) {
         String base = prompt == null ? "" : prompt.trim();
         String level = quality == null ? "standard" : quality;
@@ -317,10 +326,7 @@ public final class GatewayClient {
     }
 
     private static String qualitySize(String size, String quality) {
-        if (!"ultra".equals(quality) && !"high".equals(quality)) return size;
-        if ("1024x1024".equals(size)) return "1536x1536";
-        if ("1024x1536".equals(size)) return "1536x2048";
-        if ("1536x1024".equals(size)) return "2048x1536";
+        // Quality affects the prompt; no undocumented size escalation or ratio change.
         return size;
     }
 
@@ -336,11 +342,20 @@ public final class GatewayClient {
             try {
                 requestAttempt = attempt;
                 requestStarted = System.currentTimeMillis();
+                responseType = "";
+                responseStatus = 0;
                 return postJson(path, payload);
             } catch (ApiException e) {
                 if (cancelled || e.status == 499) throw new ApiException(499, "cancelled", "图片任务已取消");
                 recordDiagnostic("http_error", path, e);
                 last = e;
+                // Some gateways wrap an upstream unsupported aspect_ratio/size
+                // error as HTTP 502. Do not spend the long generic retry delays
+                // repeating a request known to contain an unsupported field.
+                if (isUnsupportedAspectRatio(e)) {
+                    progress("网关明确拒绝尺寸/比例参数，停止重复相同参数");
+                    throw e;
+                }
                 boolean retry = shouldRetry(e) && attempt < maxAttempts;
                 String detail = "请求 " + attempt + "/" + maxAttempts + " · HTTP " + e.status + " · " + e.getMessage();
                 progress(detail + (retry ? "；稍后重试（不保证换号）" : "；停止"));
@@ -348,6 +363,7 @@ public final class GatewayClient {
                     throw new ApiException(e.status, e.type, "已请求 " + attempt + " 次，耗时 "
                             + ((System.currentTimeMillis()-started)/1000) + " 秒；" + e.getMessage());
                 }
+                checkCancelled();
                 try {
                     Thread.sleep(attempt == 1 ? 5000L : 60000L);
                 } catch (InterruptedException interrupted) {
@@ -365,22 +381,27 @@ public final class GatewayClient {
     }
 
     private static boolean isUnsupportedAspectRatio(ApiException e) {
-        if (e == null || (e.status != 400 && e.status != 422)) return false;
+        if (e == null || (e.status != 400 && e.status != 422 && e.status != 502)) return false;
         String type = e.type == null ? "" : e.type.toLowerCase(java.util.Locale.US);
         String message = e.getMessage() == null ? "" : e.getMessage().toLowerCase(java.util.Locale.US);
-        boolean mentionsDimension = message.contains("aspect_ratio") || message.contains("aspect ratio")
-                || message.contains("size") || type.contains("aspect_ratio") || type.contains("size");
+        if (type.contains("policy") || type.contains("filter") || type.contains("auth")
+                || message.contains("content policy") || message.contains("api key")
+                || message.contains("unauthorized")) return false;
+        // Match exact field names, not e.g. max_size or resize.
+        boolean mentionsDimension = java.util.regex.Pattern.compile(
+                "(?<![a-z0-9_])(aspect_ratio|aspect ratio|size)(?![a-z0-9_])")
+                .matcher(message).find();
         boolean rejectsDimension = message.contains("unsupported") || message.contains("not supported")
                 || message.contains("does not support") || message.contains("not allowed")
                 || message.contains("unrecognized") || message.contains("unknown parameter")
-                || message.contains("invalid") || message.contains("不支持") || message.contains("不受支持");
+                || message.contains("不支持") || message.contains("不受支持");
         return mentionsDimension && rejectsDimension;
     }
 
     private static boolean shouldRetry(ApiException e) {
         String type = e.type.toLowerCase(java.util.Locale.US);
         String message = e.getMessage() == null ? "" : e.getMessage().toLowerCase(java.util.Locale.US);
-        if (e.status == 401 || e.status == 403 || e.status == 429) return false;
+        if (e.status == 401 || e.status == 403 || e.status == 429 || isUnsupportedAspectRatio(e)) return false;
         if (type.contains("policy") || type.contains("filter") || message.contains("content policy")) return false;
         return e.status == 502 || e.status == 503 || e.status == 504;
     }
@@ -389,7 +410,7 @@ public final class GatewayClient {
         JSONObject json = new JSONObject(raw);
         JSONArray data = json.optJSONArray("data");
         if (data == null || data.length() == 0) {
-            throw new ApiException(502, "upstream_error", "网关没有返回图片");
+            throw new ApiException(responseStatus, "empty_images", "网关响应成功但没有返回图片");
         }
         String conversation = "";
         JSONObject m365 = json.optJSONObject("m365");
@@ -407,7 +428,7 @@ public final class GatewayClient {
             String url = item.optString("url", "");
             if (url.startsWith("data:image/")) {
                 int comma = url.indexOf(',');
-                if (comma < 0) throw new ApiException(502, "upstream_error", "图片 data URL 无效");
+                if (comma < 0) throw new ApiException(responseStatus, "response_parse", "图片 data URL 无效");
                 out.add(new ImageItem(Base64.decode(url.substring(comma + 1), Base64.DEFAULT), "data-url", conversation));
                 continue;
             }
@@ -415,7 +436,7 @@ public final class GatewayClient {
                 out.add(new ImageItem(download(url), url, conversation));
             }
         }
-        if (out.isEmpty()) throw new ApiException(502, "upstream_error", "网关返回了空图片");
+        if (out.isEmpty()) throw new ApiException(responseStatus, "empty_images", "网关响应成功但返回了空图片");
         return out;
     }
 
@@ -507,6 +528,8 @@ public final class GatewayClient {
             recordDiagnostic("network", "unknown", failure);
             throw failure;
         }
+        responseStatus = code;
+        responseType = conn.getContentType();
         InputStream stream = code >= 400 ? conn.getErrorStream() : conn.getInputStream();
         String text = readText(stream);
         if (code >= 400) throw parseError(code, text);
@@ -517,7 +540,12 @@ public final class GatewayClient {
     private void recordDiagnostic(String phase, String path, ApiException error) {
         if (diagnosticContext == null) return;
         lastDiagnosticId = DiagnosticLog.record(diagnosticContext, phase, path, error.status,
-                error.type, error.getMessage(), System.currentTimeMillis() - requestStarted, requestAttempt);
+                error.type, redactSecret(error.getMessage()), System.currentTimeMillis() - requestStarted, requestAttempt,
+                redactSecret(requestModel), requestSize, redactSecret(responseType));
+    }
+
+    private String redactSecret(String value) {
+        return value == null ? "" : (apiKey.isEmpty() ? value : value.replace(apiKey, "[redacted]"));
     }
 
     private static ApiException parseError(int code, String text) {

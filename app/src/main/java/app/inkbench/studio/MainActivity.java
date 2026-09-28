@@ -297,7 +297,7 @@ public class MainActivity extends Activity {
         qualitySpinner = dropdown();
         composer.addView(gap(6));
         composer.addView(qualitySpinner);
-        composer.addView(hint("质量通过更严格的画面约束生效；精细和极致会自动提高请求尺寸。网关没有独立的质量参数。"));
+        composer.addView(hint("质量通过画面细节约束生效；保持所选尺寸，不再自动放大或改变比例。"));
 
         composer.addView(gap(12));
         composer.addView(label("多图取景变化"));
@@ -480,7 +480,7 @@ public class MainActivity extends Activity {
             body.addView(label("等待"));
             body.addView(gap(4));
             body.addView(timeoutField);
-            body.addView(hint("502、503、504 会用相同请求再试一次；401、403、429 不重试。多张是逐次生图。"));
+            body.addView(hint("临时 502/503/504 最多请求 3 次；明确的尺寸拒绝只做一次兼容回退；401/403/429 不重试。"));
         } else {
             body.addView(gap(8));
             body.addView(label("文字模型"));
@@ -1331,6 +1331,17 @@ public class MainActivity extends Activity {
         content.addView(cardWithContent("生图接口", imageBody));
         content.addView(gap(8));
         content.addView(cardWithContent("文字增强接口", textBody));
+        Button diagnostics = button("查看最近生图诊断", false);
+        diagnostics.setOnClickListener(v -> {
+            TextView log = text(DiagnosticLog.recent(this), 12, 0xFF1A1C19);
+            log.setTextIsSelectable(true);
+            log.setPadding(dp(16), dp(12), dp(16), dp(12));
+            ScrollView logs = new ScrollView(this);
+            logs.addView(log);
+            new AlertDialog.Builder(this).setTitle("最近 10 条诊断（可长按选中）")
+                    .setView(logs).setPositiveButton("关闭", null).show();
+        });
+        content.addView(diagnostics);
 
         content.addView(gap(16));
         content.addView(text("外观", 17, 0xFF1A1C19));
