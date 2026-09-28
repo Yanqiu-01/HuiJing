@@ -24,6 +24,14 @@ public class VisualPromptTest {
   has(ideas,"具体细节");
   if(ideas.contains("强行加入人物") || ideas.contains("每条只写一个瞬间、一个明确景别和一个主光源"))
     throw new AssertionError("idea rules still force a narrow scene template");
+
+  String simple=VisualPrompt.ideaComplexityRule(20);
+  String balanced=VisualPrompt.ideaComplexityRule(50);
+  String rich=VisualPrompt.ideaComplexityRule(85);
+  has(simple, "极简短句");
+  has(balanced, "均衡");
+  has(rich, "细节丰富");
+
   String gateway=VisualPrompt.gatewayRules();
   has(gateway,"不新增未要求的角色、道具或Logo");
   has(gateway,"主光源方向与前文一致");

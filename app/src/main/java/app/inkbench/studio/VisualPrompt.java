@@ -48,6 +48,17 @@ public final class VisualPrompt {
     }
 
     /** Rules used when the text model creates the three inspiration directions. */
+    public static String ideaComplexityRule(int complexity) {
+        int level = Math.max(0, Math.min(100, complexity));
+        if (level < 35) {
+            return "提示词复杂度偏低（极简短句）：每个prompt控制在40至80字中文，突出核心主体与关键色调，语言简短干净，不堆砌次要修饰；只描述一个画面。";
+        }
+        if (level > 65) {
+            return "提示词复杂度偏高（细节丰富）：每个prompt写180至280字中文，深入刻画主体细节、材质纹理、光影明暗与空间层次；只描述一个画面，不要把多个场景拼在一起。";
+        }
+        return "提示词复杂度均衡：每个prompt写80至180字中文，包含与该方向相关的主体、可见状态或动作、空间/背景、构图或视角、光线/色彩和材质；只描述一个画面，不要把多个场景拼在一起。";
+    }
+
     public static String ideaRules() {
         return "灵感方向要先理解主题自身的视觉可能性，再做有意义的分化；不要套用固定的叙事、特写、环境三分法，也不要默认加入人物、动作或生活场景。"
                 + "三条方向至少在两个相关维度上明显不同，差异可以来自题材处理、媒介/风格、主体关系、空间尺度、视角、构图、时间状态、色彩光线、材质或抽象程度；选择与当前主题最匹配的维度，不机械轮换景别。"

@@ -86,6 +86,7 @@ public class ModelEndpointsHttpTest {
                 check(image.client(suffix).listImageModels().equals(Collections.singletonList("gpt-image-2")), "image listing: " + suffix);
                 check(text.client(suffix).listModels().equals(Collections.singletonList("text-model")), "text listing: " + suffix);
                 check("fixture prompt".equals(text.client(suffix).enhancePrompt("apple", "", "text-model")), "text request: " + suffix);
+                check("fixture prompt".equals(text.client(suffix).suggestIdeas("apple", "", "text-model", 75)), "suggest ideas request: " + suffix);
                 check(image.client(suffix).generate("apple", "1024x1024", "standard", "gpt-image-2").size() == 1, "image request: " + suffix);
                 check("text-model".equals(text.lastModel) && "gpt-image-2".equals(image.lastModel), "models crossed");
             }

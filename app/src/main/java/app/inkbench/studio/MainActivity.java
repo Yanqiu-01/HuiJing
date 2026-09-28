@@ -165,6 +165,7 @@ public class MainActivity extends Activity {
     private boolean highRefresh = true;
     private String longDraft = "";
     private String wishDraft = "";
+    private int ideaComplexity = 50;
     private String textTaskName = "增强中…";
     private AsyncTask<Void, Void, Result> textTask;
 
@@ -880,11 +881,43 @@ public class MainActivity extends Activity {
 
     private void showIdeaInput() {
         if (busy) return;
+        LinearLayout body = vertical();
+        body.setPadding(dp(16), dp(8), dp(16), dp(8));
         final EditText input = field("例如：做手机壁纸，想要温暖、安静一点", false);
         input.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_FLAG_MULTI_LINE);
-        input.setMinLines(3); input.setText(wishDraft);
+        input.setMinLines(3);
+        input.setText(wishDraft);
+        body.addView(input);
+
+        body.addView(gap(12));
+        body.addView(label("提示词复杂度"));
+        body.addView(gap(4));
+        SeekBar complexitySeek = new SeekBar(this);
+        complexitySeek.setMax(100);
+        complexitySeek.setProgress(ideaComplexity);
+        LinearLayout complexityLine = new LinearLayout(this);
+        complexityLine.setOrientation(LinearLayout.HORIZONTAL);
+        complexityLine.setGravity(Gravity.CENTER_VERTICAL);
+        complexityLine.addView(complexitySeek, new LinearLayout.LayoutParams(0, -2, 1f));
+        final TextView complexityValue = text(String.format(Locale.US, "%.2f", ideaComplexity / 100f), 14, 0xFF1A1C19);
+        complexityValue.setMinWidth(dp(48));
+        complexityValue.setGravity(Gravity.END);
+        complexityLine.addView(complexityValue, new LinearLayout.LayoutParams(-2, -2));
+        body.addView(complexityLine);
+
+        complexitySeek.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
+            @Override public void onProgressChanged(SeekBar bar, int value, boolean fromUser) {
+                if (!fromUser) return;
+                ideaComplexity = Math.max(0, Math.min(100, value));
+                complexityValue.setText(String.format(Locale.US, "%.2f", ideaComplexity / 100f));
+                savePrefs();
+            }
+            @Override public void onStartTrackingTouch(SeekBar bar) { }
+            @Override public void onStopTrackingTouch(SeekBar bar) { }
+        });
+
         new AlertDialog.Builder(this).setTitle("今天想生成什么？")
-                .setView(input).setNegativeButton("取消", null)
+                .setView(body).setNegativeButton("取消", null)
                 .setPositiveButton("给我三个建议", (d,w) -> {
                     wishDraft = input.getText().toString();
                     savePrefs(); runTextTask("ideas", wishDraft);
@@ -919,6 +952,7 @@ public class MainActivity extends Activity {
         if(base.isEmpty() || key.isEmpty()) { toast("先填写文字接口地址和密钥"); openFold(false); return; }
         if(model == null || model.trim().isEmpty()) { toast("先在文字接口设置里选择模型"); openFold(false); return; }
         final int timeout=readTimeout();
+        final int complexity = ideaComplexity;
         savePrefs(); enhancing=true;
         textTaskName=kind.equals("ideas")?"正在寻找灵感…":kind.equals("summary")?"正在提炼画面…":"正在增强提示词…";
         setBusy(true,textTaskName);
@@ -926,7 +960,7 @@ public class MainActivity extends Activity {
             @Override protected Result doInBackground(Void... args) {
                 try {
                     GatewayClient client=new GatewayClient(base,key,timeout);
-                    String reply=kind.equals("ideas")?client.suggestIdeas(input,note,model)
+                    String reply=kind.equals("ideas")?client.suggestIdeas(input,note,model,complexity)
                             :kind.equals("summary")?client.summarizeForImage(input,note,model):client.enhancePrompt(input,note,model);
                     return Result.text(reply);
                 } catch(GatewayClient.ApiException e) { return Result.fail(explain(e)); }
@@ -1743,6 +1777,7 @@ public class MainActivity extends Activity {
         refreshSummaries();
         longDraft=prefs.getString("longDraft", "");
         wishDraft=prefs.getString("wishDraft", "");
+        ideaComplexity=Math.max(0, Math.min(100, prefs.getInt("ideaComplexity", 50)));
         java.util.ArrayList<String> history=new java.util.ArrayList<>();
         try {
             org.json.JSONArray array=new org.json.JSONArray(prefs.getString("promptUndo","[]"));
@@ -1790,6 +1825,7 @@ public class MainActivity extends Activity {
                 .putString("promptOriginal",promptHistory.original())
                 .putString("promptUndo",new org.json.JSONArray(promptHistory.steps()).toString())
                 .putString("longDraft",longDraft).putString("wishDraft",wishDraft)
+                .putInt("ideaComplexity", ideaComplexity)
                 .putBoolean("highRefresh",highRefresh)
                 .putInt("shadePercent",shadePercent)
                 .putInt("glassPercent",glassPercent)

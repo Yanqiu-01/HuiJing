@@ -218,6 +218,10 @@ public final class GatewayClient {
     }
 
     public String suggestIdeas(String wish,String style,String textModel) throws Exception {
+        return suggestIdeas(wish, style, textModel, 50);
+    }
+
+    public String suggestIdeas(String wish,String style,String textModel, int complexity) throws Exception {
         String input = wish == null || wish.trim().isEmpty()
                 ? "用户没有给出具体主题。请结合当前风格，提供三个容易直接生成、彼此差异明显的画面方向。"
                 : wish.trim();
@@ -227,7 +231,7 @@ public final class GatewayClient {
             + "先判断用户主题的主要创作空间，再从题材、媒介/风格、叙事方式、主体关系、空间尺度、视角、构图、时间状态、色彩光线、材质和抽象程度等维度中选择最有价值的差异轴。"
             + "三条建议可以都属于同一题材类型，也可以跨类型；差异必须服务于用户主题，而不是机械轮换远景、中景、特写。至少让每条在两个有意义的维度上形成不同的视觉方案，同时保留用户明确指定的主体、用途、时代、文字和禁用项。"
             + "如果主题是人物，允许从关系、动作、心理状态或空间关系展开；如果主题是物件、建筑、自然、食物、产品、图案、概念或抽象感受，就围绕其自身的形态、尺度、材料、使用痕迹、环境关系或视觉隐喻展开，不得套用人物场景模板。"
-            + "每个prompt写80至180字中文，包含与该方向相关的主体、可见状态或动作、空间/背景、构图或视角、光线/色彩和材质；只描述一个画面，不要把多个场景拼在一起。"
+            + VisualPrompt.ideaComplexityRule(complexity)
             + VisualPrompt.ideaRules()
             + "尊重用户指定的对象、用途、时代、文字和禁用项，不编造关键事实；没有指定时可以做克制且合理的创意补全。"
             + "没有明确要求时，默认加入‘画面无可读文字、无Logo、无水印’。"
