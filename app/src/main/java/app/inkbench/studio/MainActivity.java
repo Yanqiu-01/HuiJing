@@ -464,6 +464,10 @@ public class MainActivity extends Activity {
             refreshImageModelsButton.setTextSize(13);
             refreshImageModelsButton.setOnClickListener(v -> refreshImageModels());
             imageModelActions.addView(refreshImageModelsButton, weight());
+            imageModelActions.addView(gap(8));
+            Button manualImageModel = button("手动填写", false);
+            manualImageModel.setOnClickListener(v -> showManualModel(true));
+            imageModelActions.addView(manualImageModel, weight());
             imageModelStatus = hint("");
             imageModelStatus.setVisibility(View.GONE);
             body.addView(gap(6));
@@ -487,6 +491,10 @@ public class MainActivity extends Activity {
             refreshTextModelsButton.setTextSize(13);
             refreshTextModelsButton.setOnClickListener(v -> refreshTextModels());
             modelActions.addView(refreshTextModelsButton, weight());
+            modelActions.addView(gap(8));
+            Button manualTextModel = button("手动填写", false);
+            manualTextModel.setOnClickListener(v -> showManualModel(false));
+            modelActions.addView(manualTextModel, weight());
             textModelStatus = hint("");
             textModelStatus.setVisibility(View.GONE);
             body.addView(gap(6));
@@ -610,7 +618,10 @@ public class MainActivity extends Activity {
                     imageModels.clear();
                     imageModels.addAll(found);
                     paintImageModels();
-                    if (imageModelStatus != null) setModelStatus(imageModelStatus, "已更新 " + imageModels.size() + " 个模型");
+                    if (imageModelStatus != null) setModelStatus(imageModelStatus, found.isEmpty()
+                            ? "目录未列出生图模型，保留当前选择"
+                            : (found.contains(imageModel) ? "已更新 " + found.size() + " 个模型"
+                            : "当前模型未在目录中，已保留"));
                     if (refreshImageModelsButton != null) {
                         refreshImageModelsButton.setEnabled(true);
                         refreshImageModelsButton.setText("刷新模型");
@@ -619,7 +630,7 @@ public class MainActivity extends Activity {
             } catch (Exception e) {
                 runOnUiThread(() -> {
                     if (destroyed) return;
-                    if (imageModelStatus != null) setModelStatus(imageModelStatus, "获取生图模型失败：" + shortError(e));
+                    if (imageModelStatus != null) setModelStatus(imageModelStatus, modelListError(e));
                     if (refreshImageModelsButton != null) {
                         refreshImageModelsButton.setEnabled(true);
                         refreshImageModelsButton.setText("刷新模型");
@@ -677,7 +688,7 @@ public class MainActivity extends Activity {
             } catch (Exception e) {
                 runOnUiThread(() -> {
                     if (destroyed) return;
-                    if (textModelStatus != null) setModelStatus(textModelStatus, "获取失败：" + shortError(e));
+                    if (textModelStatus != null) setModelStatus(textModelStatus, modelListError(e));
                     if (refreshTextModelsButton != null) {
                         refreshTextModelsButton.setEnabled(true);
                         refreshTextModelsButton.setText("刷新模型");
@@ -685,6 +696,37 @@ public class MainActivity extends Activity {
                 });
             }
         }, "text-models").start();
+    }
+
+    private void showManualModel(boolean image) {
+        EditText input = field("模型 ID", false);
+        input.setSingleLine(true);
+        input.setText(image ? imageModel : textModel);
+        input.setSelection(input.length());
+        LinearLayout content = vertical();
+        content.setPadding(dp(20), dp(8), dp(20), dp(8));
+        content.addView(input);
+        AlertDialog dialog = new AlertDialog.Builder(this).setTitle(image ? "生图模型" : "文字模型")
+                .setView(content).setNegativeButton("取消", null).setPositiveButton("确定", null).create();
+        dialog.setOnShowListener(d -> dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener(v -> {
+            String id = input.getText().toString().trim();
+            if (id.isEmpty()) { input.setError("请输入模型 ID"); return; }
+            if (image) { imageModel = id; paintImageModels(); setModelStatus(imageModelStatus, ""); }
+            else { textModel = id; paintTextModels(); setModelStatus(textModelStatus, ""); }
+            dialog.dismiss();
+        }));
+        dialog.show();
+    }
+
+    private String modelListError(Exception e) {
+        if (e instanceof GatewayClient.ApiException) {
+            GatewayClient.ApiException error = (GatewayClient.ApiException) e;
+            if (error.status == 401 || error.status == 403) return "鉴权失败（HTTP " + error.status + "）";
+            if (error.status == 404 || error.status == 405) return "模型目录不可用（HTTP " + error.status + "），可手动填写";
+            if (error.status == 200) return "模型目录格式不正确，可手动填写";
+            if (error.status > 0) return "刷新失败（HTTP " + error.status + "），保留当前选择";
+        }
+        return "刷新失败，请检查接口地址与网络";
     }
 
     private void setModelStatus(TextView view, String message) {

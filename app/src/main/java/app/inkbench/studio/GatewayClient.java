@@ -126,28 +126,44 @@ public final class GatewayClient {
     private List<String> listModelsInternal(boolean imageOnly) throws Exception {
         HttpURLConnection conn = open("/v1/models", "GET");
         try {
-            String raw = readResponse(conn);
-            JSONObject json = new JSONObject(raw);
-            org.json.JSONArray data = json.optJSONArray("data");
+            String raw = readResponse(conn).trim();
             LinkedHashSet<String> ids = new LinkedHashSet<String>();
-            if (data != null) {
-                for (int i = 0; i < data.length(); i++) {
-                    JSONObject item = data.optJSONObject(i);
-                    if (item == null) continue;
-                    String id = item.optString("id", "").trim();
-                    if (id.length() == 0) continue;
-                    boolean image = isImageModel(item, id);
-                    if (imageOnly == image) ids.add(id);
+            try {
+                if (raw.startsWith("[")) {
+                    addModelIds(new JSONArray(raw), imageOnly, ids);
+                } else {
+                    JSONObject json = new JSONObject(raw);
+                    JSONArray data = json.optJSONArray("data");
+                    JSONArray models = json.optJSONArray("models");
+                    if (data == null && models == null) {
+                        throw new ApiException(responseStatus, "invalid_models", "模型目录格式不正确");
+                    }
+                    addModelIds(data, imageOnly, ids);
+                    addModelIds(models, imageOnly, ids);
                 }
-            }
-            if (ids.isEmpty()) {
-                throw new ApiException(200, "empty_models",
-                        imageOnly ? "接口没有返回可用图像模型" : "文字接口没有返回可用模型");
+            } catch (org.json.JSONException e) {
+                throw new ApiException(responseStatus, "invalid_models", "模型目录不是有效 JSON");
             }
             return new ArrayList<String>(ids);
         } finally {
             conn.disconnect();
             if (activeConnection == conn) activeConnection = null;
+        }
+    }
+
+    private static void addModelIds(JSONArray data, boolean imageOnly, LinkedHashSet<String> ids) {
+        if (data == null) return;
+        for (int i = 0; i < data.length(); i++) {
+            Object entry = data.opt(i);
+            JSONObject item = entry instanceof JSONObject ? (JSONObject) entry : new JSONObject();
+            Object value = item.opt("id");
+            String id = entry instanceof String ? ((String) entry).trim()
+                    : (value instanceof String ? ((String) value).trim() : "");
+            if (id.isEmpty()) {
+                value = item.opt("slug");
+                if (value instanceof String) id = ((String) value).trim();
+            }
+            if (!id.isEmpty() && imageOnly == isImageModel(item, id)) ids.add(id);
         }
     }
 
@@ -455,19 +471,20 @@ public final class GatewayClient {
     }
 
     private byte[] download(String url) throws Exception {
-        HttpURLConnection conn;
-        if (url.startsWith("/")) {
-            conn = open(url, "GET");
-        } else {
-            conn = (HttpURLConnection) new URL(url).openConnection();
-            conn.setConnectTimeout(20_000);
-            conn.setReadTimeout(timeoutMs);
-            conn.setInstanceFollowRedirects(true);
-            if (apiKey.length() > 0 && isSameHost(url)) {
-                conn.setRequestProperty("Authorization", "Bearer " + apiKey);
-                conn.setRequestProperty("User-Agent", "Mozilla/5.0 (Linux; Android 12; Mobile) AppleWebKit/537.36 Chrome/131.0 Mobile Safari/537.36");
-            }
+        checkCancelled();
+        URL target = new URL(apiUrl("/v1/images/generations"), url);
+        if (!("http".equalsIgnoreCase(target.getProtocol()) || "https".equalsIgnoreCase(target.getProtocol()))
+                || target.getUserInfo() != null) {
+            throw new ApiException(responseStatus, "response_parse", "图片链接无效");
         }
+        HttpURLConnection conn = (HttpURLConnection) target.openConnection();
+        conn.setConnectTimeout(20_000);
+        conn.setReadTimeout(timeoutMs);
+        conn.setInstanceFollowRedirects(true);
+        if (apiKey.length() > 0 && isSameOrigin(target)) {
+            conn.setRequestProperty("Authorization", "Bearer " + apiKey);
+        }
+        conn.setRequestProperty("User-Agent", "Mozilla/5.0 (Linux; Android 12; Mobile) AppleWebKit/537.36 Chrome/131.0 Mobile Safari/537.36");
         activeConnection = conn;
         try {
             checkCancelled();
@@ -483,14 +500,34 @@ public final class GatewayClient {
         }
     }
 
-    private boolean isSameHost(String url) {
+    private boolean isSameOrigin(URL target) {
         try {
-            URL target = new URL(url);
             URL base = new URL(baseUrl);
-            return target.getHost().equalsIgnoreCase(base.getHost()) && target.getPort() == base.getPort();
+            int targetPort = target.getPort() < 0 ? target.getDefaultPort() : target.getPort();
+            int basePort = base.getPort() < 0 ? base.getDefaultPort() : base.getPort();
+            return target.getProtocol().equalsIgnoreCase(base.getProtocol())
+                    && target.getHost().equalsIgnoreCase(base.getHost()) && targetPort == basePort;
         } catch (Exception ignored) {
             return false;
         }
+    }
+
+    private URL apiUrl(String path) throws Exception {
+        URL base = new URL(baseUrl);
+        if (base.getUserInfo() != null || base.getQuery() != null || base.getRef() != null) {
+            throw new ApiException(0, "config", "接口地址请勿包含账号、查询参数或片段");
+        }
+        String prefix = base.getPath();
+        while (prefix.endsWith("/")) prefix = prefix.substring(0, prefix.length() - 1);
+        for (String endpoint : new String[]{"/v1/images/generations", "/v1/images/edits",
+                "/v1/chat/completions", "/v1/models"}) {
+            if (prefix.endsWith(endpoint)) {
+                prefix = prefix.substring(0, prefix.length() - endpoint.length()) + "/v1";
+                break;
+            }
+        }
+        return new URL(base.getProtocol(), base.getHost(), base.getPort(),
+                prefix + (prefix.endsWith("/v1") ? path.substring(3) : path));
     }
 
     private HttpURLConnection open(String path, String method) throws Exception {
@@ -499,7 +536,8 @@ public final class GatewayClient {
             throw new ApiException(0, "config", "地址要以 http:// 或 https:// 开头");
         }
         checkCancelled();
-        HttpURLConnection conn = (HttpURLConnection) new URL(baseUrl + path).openConnection();
+        HttpURLConnection conn = (HttpURLConnection) (path.startsWith("/v1/")
+                ? apiUrl(path) : new URL(baseUrl + path)).openConnection();
         activeConnection = conn;
         if (cancelled) {
             conn.disconnect();

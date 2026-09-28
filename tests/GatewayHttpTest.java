@@ -13,6 +13,7 @@ public class GatewayHttpTest {
  static volatile String failureMessage;
  static volatile String successBody;
  static volatile boolean alwaysFail;
+ static volatile String modelCatalog = "";
  static final AtomicInteger requests = new AtomicInteger();
  static String base;
  static void reset(int code, String message) {
@@ -42,8 +43,26 @@ public class GatewayHttpTest {
    byte[] bytes={1,2,3}; exchange.sendResponseHeaders(200,bytes.length);
    exchange.getResponseBody().write(bytes); exchange.close();
   });
+  server.createContext("/v1/models",exchange -> {
+   String response=modelCatalog;
+   byte[] bytes=response.getBytes(StandardCharsets.UTF_8);
+   exchange.getResponseHeaders().set("Content-Type","application/json");
+   exchange.sendResponseHeaders(200,bytes.length);
+   exchange.getResponseBody().write(bytes); exchange.close();
+  });
   server.start();
+  modelCatalog="{\"object\":\"list\",\"models\":[{\"id\":\"gpt-5.6\"},{\"id\":\"gpt-image-2\"}],\"data\":[{\"id\":\"gpt-5.6\"},{\"id\":\"gpt-image-2\"}]}";
   try {
+   List<String> textModels=client().listModels();
+   List<String> imageModels=client().listImageModels();
+   check(textModels.size()==1 && textModels.contains("gpt-5.6"),"M365 text catalog parsing");
+   check(imageModels.size()==1 && imageModels.contains("gpt-image-2"),"M365 image catalog parsing");
+   modelCatalog="{\"data\":[{\"id\":\"gpt-5.6-reasoning\"}]}";
+   check(client().listImageModels().isEmpty(),"text-only catalog must not invent image models");
+   modelCatalog="{\"models\":[{\"slug\":\"gpt-image-2\"}]}";
+   check(client().listImageModels().equals(Collections.singletonList("gpt-image-2")),"models slug field parsing");
+   modelCatalog="{\"data\":[]}";
+   check(client().listImageModels().isEmpty(),"empty catalog must not invent models");
    for(int code:new int[]{400,422,502}) {
     reset(code,"Unsupported parameter: aspect_ratio");
     GatewayClient c=client();
