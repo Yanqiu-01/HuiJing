@@ -239,7 +239,6 @@ public class MainActivity extends Activity {
         TextView welcome = text("今天想生成什么？", 17, 0xFF1A1C19);
         welcome.setTypeface(Typeface.create("sans-serif-medium", Typeface.NORMAL));
         assistantCard.addView(welcome);
-        assistantCard.addView(hint("说说心情、用途或主题，让 AI 帮你找到画面。"));
         LinearLayout creativeActions = chipRow();
         ideaButton = button("给我灵感", false);
         longTextButton = button("长文变画面", false);
@@ -278,7 +277,6 @@ public class MainActivity extends Activity {
         styleSpinner = dropdown();
         composer.addView(gap(6));
         composer.addView(styleSpinner);
-        composer.addView(hint("选择“自定义”后输入风格；它会保存在本机，并用于提示词和文字增强。"));
 
         composer.addView(gap(12));
         composer.addView(label("比例"));
@@ -297,7 +295,6 @@ public class MainActivity extends Activity {
         qualitySpinner = dropdown();
         composer.addView(gap(6));
         composer.addView(qualitySpinner);
-        composer.addView(hint("质量通过画面细节约束生效；保持所选尺寸，不再自动放大或改变比例。"));
 
         composer.addView(gap(12));
         composer.addView(label("多图取景变化"));
@@ -313,7 +310,6 @@ public class MainActivity extends Activity {
         batchPromptValue.setGravity(Gravity.END);
         batchPromptLine.addView(batchPromptValue, new LinearLayout.LayoutParams(-2, -2));
         composer.addView(batchPromptLine);
-        composer.addView(hint("仅生成第 2 张及以后时生效；0 最稳定，1 变化最大，不改变主体、数量和剧情。"));
 
         composer.addView(gap(12));
         LinearLayout actions = new LinearLayout(this);
@@ -410,7 +406,6 @@ public class MainActivity extends Activity {
         galleryGrid = grid(3);
         galleryStrip.addView(galleryGrid, new FrameLayout.LayoutParams(-2, -2));
         page.addView(galleryStrip);
-        page.addView(hint("新图自动保存到系统相册「绘境」。删除这里的图片不删除相册副本。旧图可选中后补存。"));
 
         scroll.addView(page);
         root.addView(scroll, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f));
@@ -442,7 +437,7 @@ public class MainActivity extends Activity {
 
     private LinearLayout endpointBody(boolean image) {
         LinearLayout body = vertical();
-        EditText base = field(image ? "填写电脑局域网地址，例如 192.168.x.x:4141" : "留空则跟随生图地址", false);
+        EditText base = field(image ? "https://你的接口地址" : "留空则跟随生图地址", false);
         EditText key = field(image ? "生图 API Key" : "留空则用生图的 Key", true);
         if (image) {
             imageBaseField = base;
@@ -465,22 +460,22 @@ public class MainActivity extends Activity {
             body.addView(gap(4));
             body.addView(imageModelSpinner);
             LinearLayout imageModelActions = chipRow();
-            refreshImageModelsButton = button("从 /v1/models 刷新", false);
+            refreshImageModelsButton = button("刷新模型", false);
             refreshImageModelsButton.setTextSize(13);
             refreshImageModelsButton.setOnClickListener(v -> refreshImageModels());
             imageModelActions.addView(refreshImageModelsButton, weight());
-            imageModelStatus = hint("独立于文字模型；选择后用于 /v1/images/generations。");
+            imageModelStatus = hint("");
+            imageModelStatus.setVisibility(View.GONE);
             body.addView(gap(6));
             body.addView(imageModelActions);
             body.addView(imageModelStatus);
             body.addView(gap(8));
-            timeoutField = field("超时秒数，默认 360", false);
+            timeoutField = field("360", false);
             timeoutField.setInputType(InputType.TYPE_CLASS_NUMBER);
             body.addView(gap(8));
-            body.addView(label("等待"));
+            body.addView(label("超时（秒）"));
             body.addView(gap(4));
             body.addView(timeoutField);
-            body.addView(hint("临时 502/503/504 最多请求 3 次；明确的尺寸拒绝只做一次兼容回退；401/403/429 不重试。"));
         } else {
             body.addView(gap(8));
             body.addView(label("文字模型"));
@@ -488,15 +483,15 @@ public class MainActivity extends Activity {
             body.addView(gap(4));
             body.addView(textModelSpinner);
             LinearLayout modelActions = chipRow();
-            refreshTextModelsButton = button("从 /v1/models 刷新", false);
+            refreshTextModelsButton = button("刷新模型", false);
             refreshTextModelsButton.setTextSize(13);
             refreshTextModelsButton.setOnClickListener(v -> refreshTextModels());
             modelActions.addView(refreshTextModelsButton, weight());
-            textModelStatus = hint("选择后立即记住；不会静默切换模型。");
+            textModelStatus = hint("");
+            textModelStatus.setVisibility(View.GONE);
             body.addView(gap(6));
             body.addView(modelActions);
             body.addView(textModelStatus);
-            body.addView(hint("走 /v1/chat/completions。地址空着就用上面的生图地址。"));
         }
         return body;
     }
@@ -570,7 +565,6 @@ public class MainActivity extends Activity {
         int selected = style >= 0 && style < STYLES.length ? style : 0;
         setDropdown(styleSpinner, labels, selected, position -> {
             if (position == STYLE_CUSTOM) {
-                // Let the selection popup finish closing its popup before opening an editable dialog.
                 styleSpinner.post(this::showCustomStyleDialog);
             } else {
                 style = position;
@@ -591,7 +585,7 @@ public class MainActivity extends Activity {
         int selected = Math.max(0, visible.indexOf(imageModel));
         setDropdown(imageModelSpinner, labels, selected, position -> {
             imageModel = labels[position];
-            if (imageModelStatus != null) imageModelStatus.setText("当前生图模型：" + imageModel + " · 保存设置后记住");
+            if (imageModelStatus != null) setModelStatus(imageModelStatus, "");
         });
     }
 
@@ -599,14 +593,14 @@ public class MainActivity extends Activity {
         final String base = imageBaseField.getText().toString().trim();
         final String key = imageKeyField.getText().toString().trim();
         if (base.length() == 0 || key.length() == 0) {
-            if (imageModelStatus != null) imageModelStatus.setText("先填写生图接口地址和密钥，再刷新模型");
+            if (imageModelStatus != null) setModelStatus(imageModelStatus, "先填写生图接口地址和密钥，再刷新模型");
             return;
         }
         if (refreshImageModelsButton != null) {
             refreshImageModelsButton.setEnabled(false);
             refreshImageModelsButton.setText("正在获取…");
         }
-        if (imageModelStatus != null) imageModelStatus.setText("正在请求生图模型列表…");
+        if (imageModelStatus != null) setModelStatus(imageModelStatus, "刷新中…");
         final int timeout = readTimeout();
         new Thread(() -> {
             try {
@@ -616,19 +610,19 @@ public class MainActivity extends Activity {
                     imageModels.clear();
                     imageModels.addAll(found);
                     paintImageModels();
-                    if (imageModelStatus != null) imageModelStatus.setText("已获取 " + imageModels.size() + " 个生图模型 · 当前：" + imageModel);
+                    if (imageModelStatus != null) setModelStatus(imageModelStatus, "已更新 " + imageModels.size() + " 个模型");
                     if (refreshImageModelsButton != null) {
                         refreshImageModelsButton.setEnabled(true);
-                        refreshImageModelsButton.setText("从 /v1/models 刷新");
+                        refreshImageModelsButton.setText("刷新模型");
                     }
                 });
             } catch (Exception e) {
                 runOnUiThread(() -> {
                     if (destroyed) return;
-                    if (imageModelStatus != null) imageModelStatus.setText("获取生图模型失败：" + shortError(e));
+                    if (imageModelStatus != null) setModelStatus(imageModelStatus, "获取生图模型失败：" + shortError(e));
                     if (refreshImageModelsButton != null) {
                         refreshImageModelsButton.setEnabled(true);
-                        refreshImageModelsButton.setText("从 /v1/models 刷新");
+                        refreshImageModelsButton.setText("刷新模型");
                     }
                 });
             }
@@ -646,7 +640,7 @@ public class MainActivity extends Activity {
         int selected = Math.max(0, visible.indexOf(textModel));
         setDropdown(textModelSpinner, labels, selected, position -> {
             textModel = labels[position];
-            if (textModelStatus != null) textModelStatus.setText("当前模型：" + textModel + " · 点设置里的保存后记住");
+            if (textModelStatus != null) setModelStatus(textModelStatus, "");
         });
     }
 
@@ -654,14 +648,14 @@ public class MainActivity extends Activity {
         final String base = textEndpoint();
         final String key = textApiKey();
         if (base.length() == 0 || key.length() == 0) {
-            if (textModelStatus != null) textModelStatus.setText("先填写文字接口地址和密钥，再刷新模型");
+            if (textModelStatus != null) setModelStatus(textModelStatus, "先填写文字接口地址和密钥，再刷新模型");
             return;
         }
         if (refreshTextModelsButton != null) {
             refreshTextModelsButton.setEnabled(false);
             refreshTextModelsButton.setText("正在获取…");
         }
-        if (textModelStatus != null) textModelStatus.setText("正在请求 /v1/models…");
+        if (textModelStatus != null) setModelStatus(textModelStatus, "刷新中…");
         final int timeout = readTimeout();
         new Thread(() -> {
             try {
@@ -672,25 +666,30 @@ public class MainActivity extends Activity {
                     textModels.addAll(found);
                     paintTextModels();
                     boolean available = textModels.contains(textModel);
-                    if (textModelStatus != null) textModelStatus.setText(available
-                            ? "已获取 " + textModels.size() + " 个文字模型 · 当前：" + textModel
-                            : "已获取 " + textModels.size() + " 个模型，但当前模型未返回；未自动替换");
+                    if (textModelStatus != null) setModelStatus(textModelStatus, available
+                            ? "已更新 " + textModels.size() + " 个模型"
+                            : "当前模型未在列表中");
                     if (refreshTextModelsButton != null) {
                         refreshTextModelsButton.setEnabled(true);
-                        refreshTextModelsButton.setText("从 /v1/models 刷新");
+                        refreshTextModelsButton.setText("刷新模型");
                     }
                 });
             } catch (Exception e) {
                 runOnUiThread(() -> {
                     if (destroyed) return;
-                    if (textModelStatus != null) textModelStatus.setText("获取失败：" + shortError(e));
+                    if (textModelStatus != null) setModelStatus(textModelStatus, "获取失败：" + shortError(e));
                     if (refreshTextModelsButton != null) {
                         refreshTextModelsButton.setEnabled(true);
-                        refreshTextModelsButton.setText("从 /v1/models 刷新");
+                        refreshTextModelsButton.setText("刷新模型");
                     }
                 });
             }
         }, "text-models").start();
+    }
+
+    private void setModelStatus(TextView view, String message) {
+        view.setText(message);
+        view.setVisibility(message.isEmpty() ? View.GONE : View.VISIBLE);
     }
 
     private static String shortError(Exception e) {
@@ -843,7 +842,6 @@ public class MainActivity extends Activity {
         input.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_FLAG_MULTI_LINE);
         input.setMinLines(3); input.setText(wishDraft);
         new AlertDialog.Builder(this).setTitle("今天想生成什么？")
-                .setMessage("可以告诉我主题、心情和用途。留空也能给你三个惊喜建议。只调用文字接口。")
                 .setView(input).setNegativeButton("取消", null)
                 .setPositiveButton("给我三个建议", (d,w) -> {
                     wishDraft = input.getText().toString();
@@ -859,7 +857,7 @@ public class MainActivity extends Activity {
         input.setGravity(Gravity.TOP); input.setMinLines(7); input.setMaxLines(12);
         input.setText(longDraft);
         body.addView(input);
-        body.addView(hint("最多 30,000 字符。提交后原文会发到你配置的文字接口；提炼为一个代表性画面，确认后再生图。"));
+        body.addView(hint("最多 30,000 字，提交至文字接口处理。"));
         AlertDialog dialog = new AlertDialog.Builder(this).setTitle("长文 → 生图提示词")
                 .setView(body).setNegativeButton("保留草稿", (d,w)->{
                     longDraft=input.getText().toString(); savePrefs();
@@ -1331,14 +1329,14 @@ public class MainActivity extends Activity {
         content.addView(cardWithContent("生图接口", imageBody));
         content.addView(gap(8));
         content.addView(cardWithContent("文字增强接口", textBody));
-        Button diagnostics = button("查看最近生图诊断", false);
+        Button diagnostics = button("错误记录", false);
         diagnostics.setOnClickListener(v -> {
             TextView log = text(DiagnosticLog.recent(this), 12, 0xFF1A1C19);
             log.setTextIsSelectable(true);
             log.setPadding(dp(16), dp(12), dp(16), dp(12));
             ScrollView logs = new ScrollView(this);
             logs.addView(log);
-            new AlertDialog.Builder(this).setTitle("最近 10 条诊断（可长按选中）")
+            new AlertDialog.Builder(this).setTitle("错误记录")
                     .setView(logs).setPositiveButton("关闭", null).show();
         });
         content.addView(diagnostics);
@@ -1349,7 +1347,6 @@ public class MainActivity extends Activity {
         LinearLayout appearance = card();
         TextView wallpaperName = text(wallpaperUri.isEmpty() ? "默认山水背景" : "自选背景图片", 14, 0xFF1A1C19);
         appearance.addView(wallpaperName);
-        appearance.addView(hint("壁纸仅保存在本机；优先选择柔和、低细节的图片。"));
         LinearLayout wallpaperActions = chipRow();
         Button pick = button("选择背景图", false);
         Button reset = button("恢复默认", false);

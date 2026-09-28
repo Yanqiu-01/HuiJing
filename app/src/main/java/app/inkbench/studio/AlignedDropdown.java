@@ -14,7 +14,6 @@ import android.widget.ListView;
 import android.widget.PopupWindow;
 import android.widget.TextView;
 
-/** A full-width selection field whose popup uses the field's outer bounds. */
 public final class AlignedDropdown extends TextView {
     public interface Choice { void select(int position); }
     private String[] labels = new String[0];
@@ -46,7 +45,6 @@ public final class AlignedDropdown extends TextView {
         selected = Math.max(0, Math.min(index, labels.length - 1));
         choice = callback;
         updateLabel();
-        // Binding/restoring never fires a selection callback or saves preferences.
     }
 
     private void updateLabel() {
