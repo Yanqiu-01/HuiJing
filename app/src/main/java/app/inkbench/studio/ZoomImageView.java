@@ -1,15 +1,12 @@
 package app.inkbench.studio;
 
 import android.content.Context;
-import android.graphics.Bitmap;
-import android.graphics.Matrix;
-import android.graphics.drawable.Drawable;
 import android.view.GestureDetector;
 import android.view.MotionEvent;
 import android.view.ScaleGestureDetector;
 import android.widget.ImageView;
 
-/** Pinch, double-tap and drag zoom; horizontal flings are reported only at rest scale. */
+/** Pinch, double-tap and drag zoom on top of the platform fit-center scaling. */
 public final class ZoomImageView extends ImageView {
     public interface SwipeListener { void onSwipe(int direction); }
     public interface TapListener { void onTap(); }
@@ -18,12 +15,8 @@ public final class ZoomImageView extends ImageView {
     private static final float DOUBLE_TAP_SCALE = 2.5f;
     private static final float SWIPE_SLOP_DP = 48f;
 
-    private final Matrix matrix = new Matrix();
     private final ScaleGestureDetector scaleDetector;
     private final GestureDetector gestureDetector;
-    private float baseScale = 1f;
-    private float baseX;
-    private float baseY;
     private float scale = 1f;
     private float offsetX;
     private float offsetY;
@@ -34,11 +27,11 @@ public final class ZoomImageView extends ImageView {
 
     public ZoomImageView(Context context) {
         super(context);
-        setScaleType(ScaleType.MATRIX);
+        setScaleType(ScaleType.FIT_CENTER);
         final float slop = SWIPE_SLOP_DP * getResources().getDisplayMetrics().density;
         scaleDetector = new ScaleGestureDetector(context, new ScaleGestureDetector.SimpleOnScaleGestureListener() {
             @Override public boolean onScale(ScaleGestureDetector detector) {
-                zoomTo(detector.getFocusX(), detector.getFocusY(), scale * detector.getScaleFactor());
+                zoomAt(detector.getFocusX(), detector.getFocusY(), scale * detector.getScaleFactor());
                 return true;
             }
         });
@@ -49,7 +42,7 @@ public final class ZoomImageView extends ImageView {
                 return true;
             }
             @Override public boolean onDoubleTap(MotionEvent event) {
-                zoomTo(event.getX(), event.getY(), scale > 1.01f ? 1f : DOUBLE_TAP_SCALE);
+                zoomAt(event.getX(), event.getY(), scale > 1.01f ? 1f : DOUBLE_TAP_SCALE);
                 return true;
             }
             @Override public boolean onFling(MotionEvent start, MotionEvent end, float velocityX, float velocityY) {
@@ -78,7 +71,7 @@ public final class ZoomImageView extends ImageView {
                 if (scale > 1.01f && !scaleDetector.isInProgress() && event.getPointerCount() == 1) {
                     offsetX += event.getX() - lastX;
                     offsetY += event.getY() - lastY;
-                    applyMatrix();
+                    applyZoom();
                 }
                 lastX = event.getX();
                 lastY = event.getY();
@@ -89,41 +82,7 @@ public final class ZoomImageView extends ImageView {
         return true;
     }
 
-    private void zoomTo(float focusX, float focusY, float target) {
-        Drawable drawable = getDrawable();
-        if (drawable == null) return;
-        float contentX = (focusX - baseX - offsetX) / (baseScale * scale);
-        float contentY = (focusY - baseY - offsetY) / (baseScale * scale);
-        scale = Math.max(1f, Math.min(MAX_SCALE, target));
-        offsetX = focusX - baseX - contentX * baseScale * scale;
-        offsetY = focusY - baseY - contentY * baseScale * scale;
-        applyMatrix();
-    }
-
-    private void applyMatrix() {
-        clampOffsets();
-        matrix.reset();
-        matrix.postScale(baseScale * scale, baseScale * scale);
-        matrix.postTranslate(baseX + offsetX, baseY + offsetY);
-        setImageMatrix(matrix);
-        invalidate();
-    }
-
-    private void clampOffsets() {
-        Drawable drawable = getDrawable();
-        if (drawable == null || getWidth() <= 0 || getHeight() <= 0) return;
-        float width = drawable.getIntrinsicWidth() * baseScale * scale;
-        float height = drawable.getIntrinsicHeight() * baseScale * scale;
-        offsetX = clampCenter(baseX + offsetX, width, getWidth()) - baseX;
-        offsetY = clampCenter(baseY + offsetY, height, getHeight()) - baseY;
-    }
-
-    static float clampCenter(float value, float content, float view) {
-        if (content <= view) return (view - content) / 2f;
-        return Math.max(view - content, Math.min(0f, value));
-    }
-
-    @Override public void setImageBitmap(Bitmap bitmap) {
+    @Override public void setImageBitmap(android.graphics.Bitmap bitmap) {
         super.setImageBitmap(bitmap);
         resetZoom();
     }
@@ -133,30 +92,53 @@ public final class ZoomImageView extends ImageView {
         resetZoom();
     }
 
+    private void zoomAt(float focusX, float focusY, float target) {
+        float previous = scale;
+        scale = Math.max(1f, Math.min(MAX_SCALE, target));
+        offsetX += (focusX - getWidth() / 2f) * (1f - scale / previous);
+        offsetY += (focusY - getHeight() / 2f) * (1f - scale / previous);
+        applyZoom();
+    }
+
+    private void applyZoom() {
+        float limitX = maxOffset(fittedWidth(), getWidth());
+        float limitY = maxOffset(fittedHeight(), getHeight());
+        offsetX = Math.max(-limitX, Math.min(limitX, offsetX));
+        offsetY = Math.max(-limitY, Math.min(limitY, offsetY));
+        setScaleX(scale);
+        setScaleY(scale);
+        setTranslationX(offsetX);
+        setTranslationY(offsetY);
+    }
+
+    private float fittedWidth() { return drawableWidth() * fittedScale(); }
+    private float fittedHeight() { return drawableHeight() * fittedScale(); }
+
+    private float fittedScale() {
+        float width = getWidth();
+        float height = getHeight();
+        float drawableWidth = drawableWidth();
+        float drawableHeight = drawableHeight();
+        if (width <= 0 || height <= 0 || drawableWidth <= 0 || drawableHeight <= 0) return 1f;
+        return Math.min(width / drawableWidth, height / drawableHeight);
+    }
+
+    private float drawableWidth() {
+        return getDrawable() == null ? 0f : getDrawable().getIntrinsicWidth();
+    }
+
+    private float drawableHeight() {
+        return getDrawable() == null ? 0f : getDrawable().getIntrinsicHeight();
+    }
+
+    static float maxOffset(float content, float view) {
+        return Math.max(0f, (content - view) / 2f);
+    }
+
     private void resetZoom() {
         scale = 1f;
         offsetX = 0f;
         offsetY = 0f;
-        Drawable drawable = getDrawable();
-        int width = getWidth();
-        int height = getHeight();
-        if (drawable == null || width <= 0 || height <= 0) {
-            baseScale = 1f;
-            baseX = 0f;
-            baseY = 0f;
-            return;
-        }
-        int intrinsicWidth = drawable.getIntrinsicWidth();
-        int intrinsicHeight = drawable.getIntrinsicHeight();
-        if (intrinsicWidth <= 0 || intrinsicHeight <= 0) {
-            baseScale = 1f;
-            baseX = 0f;
-            baseY = 0f;
-            return;
-        }
-        baseScale = Math.min((float) width / intrinsicWidth, (float) height / intrinsicHeight);
-        baseX = (width - intrinsicWidth * baseScale) / 2f;
-        baseY = (height - intrinsicHeight * baseScale) / 2f;
-        applyMatrix();
+        applyZoom();
     }
 }

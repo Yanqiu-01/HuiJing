@@ -5,25 +5,22 @@ public class ZoomImageTest {
     static float near(float value) { return Math.round(value * 1000f) / 1000f; }
 
     public static void main(String[] args) throws Exception {
-        Method clamp = Class.forName("app.inkbench.studio.ZoomImageView")
-                .getDeclaredMethod("clampCenter", float.class, float.class, float.class);
-        clamp.setAccessible(true);
-        check(near((Float) clamp.invoke(null, 0f, 100f, 200f)) == 50f, "small content centered");
-        check(near((Float) clamp.invoke(null, 40f, 100f, 200f)) == 50f, "small content ignores offset");
-        check(near((Float) clamp.invoke(null, 200f, 200f, 200f)) == 0f, "exact fit");
-        check(near((Float) clamp.invoke(null, 0f, 300f, 200f)) == 0f, "overflow keeps left edge at rest");
-        check(near((Float) clamp.invoke(null, -200f, 300f, 200f)) == -100f, "overflow clamps far drag");
-        check(near((Float) clamp.invoke(null, 60f, 300f, 200f)) == 0f, "overflow clamps opposite drag");
+        Method limit = Class.forName("app.inkbench.studio.ZoomImageView")
+                .getDeclaredMethod("maxOffset", float.class, float.class);
+        limit.setAccessible(true);
+        check(near((Float) limit.invoke(null, 100f, 200f)) == 0f, "smaller content cannot pan");
+        check(near((Float) limit.invoke(null, 200f, 200f)) == 0f, "exact fit cannot pan");
+        check(near((Float) limit.invoke(null, 300f, 200f)) == 50f, "overflow allows half the overflow");
+        check(near((Float) limit.invoke(null, 1000f, 200f)) == 400f, "large overflow");
         for (float content : new float[]{10f, 100f, 200f, 300f, 900f}) {
             for (float view : new float[]{50f, 200f, 500f}) {
+                float allowed = (Float) limit.invoke(null, content, view);
+                check(allowed >= 0f, "pan limit is never negative");
                 for (float offset : new float[]{-900f, -250f, 0f, 17f, 400f}) {
-                    float value = (Float) clamp.invoke(null, offset, content, view);
-                    if (content <= view) {
-                        check(near(value) == near((view - content) / 2f), "centered: " + content + "/" + view);
-                    } else {
-                        check(value <= 0.001f, "no right gap: " + content + "/" + view);
-                        check(value + content >= view - 0.001f, "no left gap: " + content + "/" + view);
-                    }
+                    float clamped = Math.max(-allowed, Math.min(allowed, offset));
+                    check(Math.abs(clamped) <= allowed + 0.001f, "pan stays inside limit");
+                    if (content <= view) check(clamped == 0f, "fitted content stays centered");
+                    else check(Math.abs(clamped) <= (content - view) / 2f + 0.001f, "no empty edge");
                 }
             }
         }
@@ -47,6 +44,6 @@ public class ZoomImageTest {
         check("".equals(caption.invoke(null, new String[]{null}, 0)), "null caption");
         check("".equals(caption.invoke(null, (Object) null, 0)), "null array");
 
-        System.out.println("PASS: zoom clamping keeps content inside bounds, paging bounds, caption resolution");
+        System.out.println("PASS: zoom pan limits, paging bounds, caption resolution");
     }
 }
