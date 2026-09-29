@@ -29,6 +29,7 @@ public final class PreviewLoader {
     public void load(ImageView view, File file, int target, boolean animate, LoadListener listener, boolean keepPrevious) {
         final String key=file.getAbsolutePath()+"|"+target+"|"+file.lastModified();
         view.setTag(key);
+        if (closed) return;
         Bitmap hit=cache.get(key);
         if(hit!=null) {
             view.setImageBitmap(hit);

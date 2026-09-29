@@ -11,7 +11,8 @@ public class ZoomImageTest {
         check(near((Float) limit.invoke(null, 100f, 200f)) == 0f, "smaller content cannot pan");
         check(near((Float) limit.invoke(null, 200f, 200f)) == 0f, "exact fit cannot pan");
         check(near((Float) limit.invoke(null, 300f, 200f)) == 50f, "overflow allows half the overflow");
-        check(near((Float) limit.invoke(null, 1000f, 200f)) == 400f, "large overflow");
+        check(near((Float) limit.invoke(null, 200f * 2f, 200f)) == 100f, "2x zoom allows panning");
+        check(near((Float) limit.invoke(null, 200f * 5f, 200f)) == 400f, "5x zoom allows panning");
         for (float content : new float[]{10f, 100f, 200f, 300f, 900f}) {
             for (float view : new float[]{50f, 200f, 500f}) {
                 float allowed = (Float) limit.invoke(null, content, view);
@@ -24,6 +25,16 @@ public class ZoomImageTest {
                 }
             }
         }
+
+        Method zoomOffset = Class.forName("app.inkbench.studio.ZoomImageView")
+                .getDeclaredMethod("zoomOffset", float.class, float.class, float.class, float.class, float.class);
+        zoomOffset.setAccessible(true);
+        check(near((Float) zoomOffset.invoke(null, 0f, 300f, 500f, 1f, 2f)) == 200f,
+                "zoom around left-side focus");
+        check(near((Float) zoomOffset.invoke(null, -80f, 300f, 500f, 2f, 3f)) == -20f,
+                "zoom preserves focus after panning");
+        check(near((Float) zoomOffset.invoke(null, 120f, 200f, 500f, 3f, 1f)) == -160f,
+                "zoom back preserves focus");
 
         Method page = Class.forName("app.inkbench.studio.ViewerActivity")
                 .getDeclaredMethod("pageIndex", int.class, int.class, int.class);

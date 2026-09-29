@@ -95,14 +95,21 @@ public final class ZoomImageView extends ImageView {
     private void zoomAt(float focusX, float focusY, float target) {
         float previous = scale;
         scale = Math.max(1f, Math.min(MAX_SCALE, target));
-        offsetX += (focusX - getWidth() / 2f) * (1f - scale / previous);
-        offsetY += (focusY - getHeight() / 2f) * (1f - scale / previous);
+        offsetX = zoomOffset(offsetX, focusX, getWidth() / 2f, previous, scale);
+        offsetY = zoomOffset(offsetY, focusY, getHeight() / 2f, previous, scale);
         applyZoom();
     }
 
+    static float zoomOffset(float oldOffset, float focus, float center,
+                             float previousScale, float newScale) {
+        if (previousScale <= 0f) return oldOffset;
+        float ratio = newScale / previousScale;
+        return focus - center - (focus - center - oldOffset) * ratio;
+    }
+
     private void applyZoom() {
-        float limitX = maxOffset(fittedWidth(), getWidth());
-        float limitY = maxOffset(fittedHeight(), getHeight());
+        float limitX = maxOffset(fittedWidth() * scale, getWidth());
+        float limitY = maxOffset(fittedHeight() * scale, getHeight());
         offsetX = Math.max(-limitX, Math.min(limitX, offsetX));
         offsetY = Math.max(-limitY, Math.min(limitY, offsetY));
         setScaleX(scale);
