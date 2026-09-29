@@ -117,7 +117,9 @@ public class ViewerActivity extends Activity {
             return;
         }
         final String text = captionFor(prompts, index);
-        previews.load(image, new File(paths[index]), 2400, true, bitmap -> caption.setText(text), true);
+        previews.load(image, new File(paths[index]), 2400, true, bitmap -> {
+            if (bitmap != null) caption.setText(text);
+        }, true);
     }
 
     static int pageIndex(int current, int delta, int count) {
@@ -127,8 +129,8 @@ public class ViewerActivity extends Activity {
     }
 
     static String captionFor(String[] prompts, int index) {
-        if (prompts == null || index < 0 || index >= prompts.length) return "";
-        return prompts[index] == null ? "" : prompts[index];
+      if (prompts == null || index < 0 || index >= prompts.length) return "";
+      return prompts[index] == null ? "" : prompts[index];
     }
 
     private String[] stringArray(String key) {

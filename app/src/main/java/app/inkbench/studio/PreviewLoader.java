@@ -37,7 +37,7 @@ public final class PreviewLoader {
             return;
         }
         if(!keepPrevious) view.setImageDrawable(null);
-        if(closed) { if(listener!=null) listener.onLoaded(null); return; }
+        if(closed) return;
         worker.execute(()->{
             Bitmap bitmap=null;
             try {
