@@ -51,7 +51,7 @@ public final class JobService extends Service {
         albumSaved=0;
         albumFailed=0;
         albumError="";
-        total=Math.max(1,Math.min(4,intent.getIntExtra(EXTRA_COUNT,1)));
+        total=Math.max(1,Math.min(10,intent.getIntExtra(EXTRA_COUNT,1)));
         final String base=intent.getStringExtra(EXTRA_BASE), key=intent.getStringExtra(EXTRA_KEY),
                 prompt=intent.getStringExtra(EXTRA_PROMPT), size=intent.getStringExtra(EXTRA_SIZE),
                 quality=intent.getStringExtra(EXTRA_QUALITY), imageModel=intent.getStringExtra(EXTRA_IMAGE_MODEL);

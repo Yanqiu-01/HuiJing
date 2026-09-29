@@ -29,6 +29,15 @@ public final class BatchPromptPolicyTest {
         String nextBatch = BatchPromptPolicy.compose(original, 100, 1, seed + 1);
         if (image2.equals(nextBatch)) throw new AssertionError("new batch seed did not vary profile");
 
+        // Verify all 10 images (indices 0..9) generate non-empty, distinct variants for batch size 10
+        java.util.Set<String> batch10 = new java.util.HashSet<String>();
+        for (int i = 0; i < 10; i++) {
+            String variant = BatchPromptPolicy.compose(original, 100, i, seed);
+            if (variant == null || variant.length() == 0) throw new AssertionError("empty variant at index " + i);
+            batch10.add(variant);
+        }
+        if (batch10.size() < 10) throw new AssertionError("variants for 10 images collided: " + batch10.size());
+
         String locked = "一位女性坐在窗边，保持正面全身构图，固定蓝绿色配色，保持逆光，表情平静，核心动作不变";
         String guarded = BatchPromptPolicy.compose(locked, 100, 1, seed);
         if (!guarded.startsWith(locked + "。")) throw new AssertionError("original constraints not preserved");

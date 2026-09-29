@@ -49,7 +49,6 @@ import java.util.Locale;
 public class MainActivity extends Activity {
 
     private static final String PREFS = "inkbench";
-    private static final int[] COUNTS = new int[]{1, 2, 3, 4};
     private static final String[] IMAGE_MODEL_PRESETS = new String[]{
             "gpt-image-2", "grok-imagine", "grok-2-image-1212"
     };
@@ -121,7 +120,8 @@ public class MainActivity extends Activity {
     private TextView textCaret;
     private LinearLayout resultBlock;
     private AlignedDropdown sizeSpinner;
-    private AlignedDropdown countSpinner;
+    private SeekBar countSeek;
+    private TextView countValue;
     private AlignedDropdown styleSpinner;
     private AlignedDropdown qualitySpinner;
     private SeekBar batchPromptSeek;
@@ -287,9 +287,18 @@ public class MainActivity extends Activity {
 
         composer.addView(gap(12));
         composer.addView(label("张数"));
-        countSpinner = dropdown();
-        composer.addView(gap(6));
-        composer.addView(countSpinner);
+        countSeek = new SeekBar(this);
+        countSeek.setMax(9);
+        composer.addView(gap(4));
+        LinearLayout countLine = new LinearLayout(this);
+        countLine.setOrientation(LinearLayout.HORIZONTAL);
+        countLine.setGravity(Gravity.CENTER_VERTICAL);
+        countLine.addView(countSeek, new LinearLayout.LayoutParams(0, -2, 1f));
+        countValue = text(count + " 张", 14, 0xFF1A1C19);
+        countValue.setMinWidth(dp(48));
+        countValue.setGravity(Gravity.END);
+        countLine.addView(countValue, new LinearLayout.LayoutParams(-2, -2));
+        composer.addView(countLine);
 
         composer.addView(gap(12));
         composer.addView(label("质量"));
@@ -550,16 +559,23 @@ public class MainActivity extends Activity {
     }
 
     private void paintCounts() {
-        String[] labels = new String[COUNTS.length];
-        int selected = 0;
-        for (int i = 0; i < COUNTS.length; i++) {
-            labels[i] = COUNTS[i] + " 张";
-            if (COUNTS[i] == count) selected = i;
-        }
-        setDropdown(countSpinner, labels, selected, position -> {
-            count = COUNTS[position];
-            if (!busy) generateButton.setText("生成 " + count + " 张");
-            savePrefs();
+        if (countSeek == null) return;
+        if (count < 1) count = 1;
+        if (count > 10) count = 10;
+        countSeek.setMax(9);
+        countSeek.setProgress(count - 1);
+        if (countValue != null) countValue.setText(count + " 张");
+        if (!busy && generateButton != null) generateButton.setText("生成 " + count + " 张");
+        countSeek.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
+            @Override public void onProgressChanged(SeekBar bar, int value, boolean fromUser) {
+                if (!fromUser) return;
+                count = Math.max(1, Math.min(10, value + 1));
+                if (countValue != null) countValue.setText(count + " 张");
+                if (!busy && generateButton != null) generateButton.setText("生成 " + count + " 张");
+                savePrefs();
+            }
+            @Override public void onStartTrackingTouch(SeekBar bar) { }
+            @Override public void onStopTrackingTouch(SeekBar bar) { }
         });
     }
 
@@ -1358,7 +1374,7 @@ public class MainActivity extends Activity {
         refreshHistoryButtons();
         if (styleSpinner != null) styleSpinner.setEnabled(!value);
         if (sizeSpinner != null) sizeSpinner.setEnabled(!value);
-        if (countSpinner != null) countSpinner.setEnabled(!value);
+        if (countSeek != null) countSeek.setEnabled(!value);
         if (qualitySpinner != null) qualitySpinner.setEnabled(!value);
         if (batchPromptSeek != null) batchPromptSeek.setEnabled(!value);
         generateButton.setEnabled(!value);
@@ -1784,7 +1800,7 @@ public class MainActivity extends Activity {
         customStyleText = prefs.getString("customStyle", "");
         if (style < 0 || style >= STYLES.length) style = 0;
         if (style == STYLE_CUSTOM && customStyleText.length() == 0) style = 0;
-        if (count < 1 || count > 4) count = 1;
+        if (count < 1 || count > 10) count = 1;
         imageOpen = false;
         textOpen = false;
         paintSizes();
