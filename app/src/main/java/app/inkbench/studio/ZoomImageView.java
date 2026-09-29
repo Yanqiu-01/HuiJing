@@ -1,12 +1,14 @@
 package app.inkbench.studio;
 
 import android.content.Context;
+import android.graphics.Canvas;
+import android.graphics.drawable.Drawable;
 import android.view.GestureDetector;
 import android.view.MotionEvent;
 import android.view.ScaleGestureDetector;
 import android.widget.ImageView;
 
-/** Pinch, double-tap and drag zoom on top of the platform fit-center scaling. */
+/** Pinch, double-tap and drag zoom drawn directly into the stable image viewport. */
 public final class ZoomImageView extends ImageView {
     public interface SwipeListener { void onSwipe(int direction); }
     public interface TapListener { void onTap(); }
@@ -14,6 +16,7 @@ public final class ZoomImageView extends ImageView {
     private static final float MAX_SCALE = 5f;
     private static final float DOUBLE_TAP_SCALE = 2.5f;
     private static final float SWIPE_SLOP_DP = 48f;
+    private static final int INVALID_POINTER = -1;
 
     private final ScaleGestureDetector scaleDetector;
     private final GestureDetector gestureDetector;
@@ -22,12 +25,14 @@ public final class ZoomImageView extends ImageView {
     private float offsetY;
     private float lastX;
     private float lastY;
+    private int activePointerId = INVALID_POINTER;
     private SwipeListener swipeListener;
     private TapListener tapListener;
 
     public ZoomImageView(Context context) {
         super(context);
-        setScaleType(ScaleType.FIT_CENTER);
+        // The drawable is rendered in onDraw; ImageView only provides the stable viewport and touch target.
+        setScaleType(ScaleType.CENTER);
         final float slop = SWIPE_SLOP_DP * getResources().getDisplayMetrics().density;
         scaleDetector = new ScaleGestureDetector(context, new ScaleGestureDetector.SimpleOnScaleGestureListener() {
             @Override public boolean onScale(ScaleGestureDetector detector) {
@@ -59,22 +64,61 @@ public final class ZoomImageView extends ImageView {
     public void setSwipeListener(SwipeListener listener) { swipeListener = listener; }
     public void setTapListener(TapListener listener) { tapListener = listener; }
 
+    @Override protected void onDraw(Canvas canvas) {
+        Drawable drawable = getDrawable();
+        if (drawable == null || drawable.getIntrinsicWidth() <= 0 || drawable.getIntrinsicHeight() <= 0) return;
+        float base = fittedScale();
+        float drawScale = base * scale;
+        float drawWidth = drawable.getIntrinsicWidth() * drawScale;
+        float drawHeight = drawable.getIntrinsicHeight() * drawScale;
+        float left = (getWidth() - drawWidth) / 2f + offsetX;
+        float top = (getHeight() - drawHeight) / 2f + offsetY;
+        int save = canvas.save();
+        drawable.setBounds(0, 0, drawable.getIntrinsicWidth(), drawable.getIntrinsicHeight());
+        canvas.translate(left, top);
+        canvas.scale(drawScale, drawScale);
+        drawable.draw(canvas);
+        canvas.restoreToCount(save);
+    }
+
     @Override public boolean onTouchEvent(MotionEvent event) {
         scaleDetector.onTouchEvent(event);
         gestureDetector.onTouchEvent(event);
         switch (event.getActionMasked()) {
             case MotionEvent.ACTION_DOWN:
-                lastX = event.getX();
-                lastY = event.getY();
+                activePointerId = event.getPointerId(0);
+                lastX = event.getX(0);
+                lastY = event.getY(0);
                 break;
             case MotionEvent.ACTION_MOVE:
-                if (scale > 1.01f && !scaleDetector.isInProgress() && event.getPointerCount() == 1) {
-                    offsetX += event.getX() - lastX;
-                    offsetY += event.getY() - lastY;
+                int moveIndex = event.findPointerIndex(activePointerId);
+                if (scale > 1.01f && !scaleDetector.isInProgress()
+                        && event.getPointerCount() == 1 && moveIndex >= 0) {
+                    offsetX += event.getX(moveIndex) - lastX;
+                    offsetY += event.getY(moveIndex) - lastY;
                     applyZoom();
                 }
-                lastX = event.getX();
-                lastY = event.getY();
+                if (moveIndex >= 0) {
+                    lastX = event.getX(moveIndex);
+                    lastY = event.getY(moveIndex);
+                }
+                break;
+            case MotionEvent.ACTION_POINTER_UP:
+                int liftedId = event.getPointerId(event.getActionIndex());
+                if (liftedId == activePointerId) {
+                    int replacement = event.getActionIndex() == 0 ? 1 : 0;
+                    if (replacement < event.getPointerCount()) {
+                        activePointerId = event.getPointerId(replacement);
+                        lastX = event.getX(replacement);
+                        lastY = event.getY(replacement);
+                    } else {
+                        activePointerId = INVALID_POINTER;
+                    }
+                }
+                break;
+            case MotionEvent.ACTION_UP:
+            case MotionEvent.ACTION_CANCEL:
+                activePointerId = INVALID_POINTER;
                 break;
             default:
                 break;
@@ -112,10 +156,7 @@ public final class ZoomImageView extends ImageView {
         float limitY = maxOffset(fittedHeight() * scale, getHeight());
         offsetX = Math.max(-limitX, Math.min(limitX, offsetX));
         offsetY = Math.max(-limitY, Math.min(limitY, offsetY));
-        setScaleX(scale);
-        setScaleY(scale);
-        setTranslationX(offsetX);
-        setTranslationY(offsetY);
+        postInvalidateOnAnimation();
     }
 
     private float fittedWidth() { return drawableWidth() * fittedScale(); }
@@ -146,6 +187,6 @@ public final class ZoomImageView extends ImageView {
         scale = 1f;
         offsetX = 0f;
         offsetY = 0f;
-        applyZoom();
+        postInvalidateOnAnimation();
     }
 }
