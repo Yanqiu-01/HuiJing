@@ -1187,6 +1187,8 @@ public class MainActivity extends Activity {
     }
     @Override protected void onDestroy() {
         destroyed=true;
+        wallpaperLoadToken++;
+        if (wallpaperView != null) wallpaperView.removeCallbacks(wallpaperReloadTask);
         jobHandler.removeCallbacksAndMessages(null);
         if(textTask!=null) textTask.cancel(true);
         galleryWorker.shutdownNow();
@@ -1574,13 +1576,15 @@ public class MainActivity extends Activity {
     };
 
     private void loadWallpaper() {
+        if (destroyed || wallpaperView == null) return;
         final int token = ++wallpaperLoadToken;
         final String uriText = wallpaperUri;
         new Thread(() -> {
             Bitmap clear = null;
             Bitmap soft = null;
             try {
-                clear = decodeWallpaper(uriText, uriText.isEmpty() ? 2048 : 1280);
+                int clearTarget = wallpaperTargetDimension();
+                clear = decodeWallpaper(uriText, clearTarget);
                 if (blurAmount > 0) {
                     Bitmap blurSource = decodeWallpaper(uriText, 420);
                     if (blurSource != null) soft = soften(blurSource, blurAmount);
@@ -1615,8 +1619,8 @@ public class MainActivity extends Activity {
     private Bitmap decodeWallpaper(String uriText, int maxDimension) throws Exception {
         BitmapFactory.Options opts = new BitmapFactory.Options();
         if (uriText.isEmpty()) {
-            // The bundled 1080x1920 image is small enough to keep its detail.
-            opts.inSampleSize = 1;
+            // Keep the bundled 1080x1920 source at its real size; drawable resources otherwise scale by density.
+            opts.inScaled = false;
             return BitmapFactory.decodeResource(getResources(), R.drawable.wallpaper_default, opts);
         }
         BitmapFactory.Options bounds = new BitmapFactory.Options();
@@ -1624,13 +1628,28 @@ public class MainActivity extends Activity {
         try (InputStream in = getContentResolver().openInputStream(Uri.parse(uriText))) {
             BitmapFactory.decodeStream(in, null, bounds);
         }
-        int sample = 1;
-        while (Math.max(bounds.outWidth, bounds.outHeight) / sample > maxDimension) sample *= 2;
+        if (bounds.outWidth <= 0 || bounds.outHeight <= 0) return null;
+        long pixelLimit = WallpaperDecodePolicy.maxPixels(Runtime.getRuntime().maxMemory());
+        int sample = WallpaperDecodePolicy.sampleFor(bounds.outWidth, bounds.outHeight, maxDimension, pixelLimit);
         opts.inSampleSize = sample;
-        opts.inPreferredConfig = Bitmap.Config.RGB_565;
+        opts.inPreferredConfig = Bitmap.Config.ARGB_8888;
         try (InputStream in = getContentResolver().openInputStream(Uri.parse(uriText))) {
             return BitmapFactory.decodeStream(in, null, opts);
+        } catch (OutOfMemoryError memory) {
+            // Preserve the larger source when possible; only reduce color depth after a real allocation failure.
+            opts.inSampleSize = sample >= (1 << 29) ? (1 << 30) : sample * 2;
+            opts.inPreferredConfig = Bitmap.Config.RGB_565;
+            try (InputStream in = getContentResolver().openInputStream(Uri.parse(uriText))) {
+                return BitmapFactory.decodeStream(in, null, opts);
+            }
         }
+    }
+
+    private int wallpaperTargetDimension() {
+        android.util.DisplayMetrics metrics = getResources().getDisplayMetrics();
+        int width = wallpaperView == null ? 0 : wallpaperView.getWidth();
+        int height = wallpaperView == null ? 0 : wallpaperView.getHeight();
+        return WallpaperDecodePolicy.targetDimension(width, height, metrics.widthPixels, metrics.heightPixels);
     }
 
     private void replaceWallpaperBitmap(ImageView view, Bitmap next) {
